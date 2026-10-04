@@ -1,0 +1,19 @@
+[Unit]
+Description=Back up NeedTODO accounts and schedules
+After=needtodo.service
+ConditionPathExists=/var/lib/needtodo/needtodo.sqlite
+
+[Service]
+Type=oneshot
+User=needtodo
+Group=needtodo
+WorkingDirectory=/opt/needtodo
+EnvironmentFile=/etc/needtodo.env
+ExecStart=/opt/needtodo/node/bin/node backup.mjs
+ExecStartPost=/usr/bin/find /var/lib/needtodo/backups -maxdepth 1 -type f -name needtodo-????-??-??T??-??-??.???Z.sqlite -mmin +10080 -delete
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/needtodo

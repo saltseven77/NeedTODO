@@ -1,0 +1,11 @@
+* text=auto
+*.dart text eol=lf
+*.mjs text eol=lf
+*.swift text eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+gradlew text eol=lf
+*.png binary
+*.ico binary

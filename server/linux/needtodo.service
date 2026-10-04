@@ -1,0 +1,31 @@
+[Unit]
+Description=NeedTODO account service
+After=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=needtodo
+Group=needtodo
+WorkingDirectory=/opt/needtodo
+EnvironmentFile=/etc/needtodo.env
+Environment=NODE_OPTIONS=--max-old-space-size=96
+Environment=UV_THREADPOOL_SIZE=1
+ExecStart=/opt/needtodo/node/bin/node index.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+StateDirectory=needtodo
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/needtodo
+MemoryAccounting=true
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
