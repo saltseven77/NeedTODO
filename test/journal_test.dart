@@ -345,6 +345,8 @@ void main() {
     );
     await tester.tap(find.text('自由页').first);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('纸张背景'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('纸张背景'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('方格'));
