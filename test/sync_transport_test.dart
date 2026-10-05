@@ -12,7 +12,7 @@ class InterruptedClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     attempts++;
-    if (attempts == 1)
+    if (attempts == 1) {
       return http.StreamedResponse(
         Stream<List<int>>.error(
           http.ClientException(
@@ -22,6 +22,7 @@ class InterruptedClient extends http.BaseClient {
         ),
         200,
       );
+    }
     return http.StreamedResponse(
       Stream.value(
         utf8.encode(
@@ -51,8 +52,9 @@ class ReadableCloud extends AppStore {
   ]) async {
     if (method == 'GET') return {'revision': 8, 'document': cloud.toJson()};
     uploads++;
-    if (failUpload)
+    if (failUpload) {
       throw http.ClientException('Connection closed while receiving data');
+    }
     return {'revision': 9, 'document': body!['document']};
   }
 }
