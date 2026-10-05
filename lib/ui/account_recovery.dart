@@ -14,28 +14,33 @@ class AccountRecoveryPage extends StatefulWidget {
 }
 
 class _AccountRecoveryPageState extends State<AccountRecoveryPage> {
-  final password = TextEditingController(),
-      confirmation = TextEditingController();
   Timer? timer;
-  String? ticket, username, error;
-  bool busy = false, polling = false;
+  String? ticket, error;
+  bool busy = false, polling = false, authorized = false;
   DateTime? started;
   @override
   void dispose() {
     timer?.cancel();
-    password.dispose();
-    confirmation.dispose();
     super.dispose();
   }
 
-  Future<void> run(Future<void> Function() action) async {
+  Future<void> begin() async {
     if (busy) return;
+    timer?.cancel();
     setState(() {
       busy = true;
       error = null;
+      authorized = false;
+      ticket = null;
     });
     try {
-      await action();
+      final flow = await widget.store.startRecovery();
+      if (!mounted) return;
+      setState(() {
+        ticket = flow['ticket'];
+        started = DateTime.now();
+      });
+      timer = Timer.periodic(const Duration(seconds: 3), (_) => poll());
     } catch (e) {
       if (mounted) {
         setState(() => error = e.toString().replaceFirst('Exception: ', ''));
@@ -43,17 +48,6 @@ class _AccountRecoveryPageState extends State<AccountRecoveryPage> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
-  }
-
-  Future<void> begin() async {
-    timer?.cancel();
-    final flow = await widget.store.startRecovery();
-    if (!mounted) return;
-    setState(() {
-      ticket = flow['ticket'];
-      started = DateTime.now();
-    });
-    timer = Timer.periodic(const Duration(seconds: 3), (_) => poll());
   }
 
   Future<void> poll() async {
@@ -69,13 +63,16 @@ class _AccountRecoveryPageState extends State<AccountRecoveryPage> {
       if (status['status'] == 'failed') {
         throw Exception('验证失败，请确认该 GitHub 已绑定泥土豆账号');
       }
-      if (status['status'] == 'complete') {
+      if (status['status'] == 'complete' && !authorized) {
+        setState(() => authorized = true);
+      }
+      if (status['status'] == 'consumed') {
         timer?.cancel();
-        setState(() => username = status['username']);
+        Navigator.pop(context, status['username'] as String);
       }
     } catch (e) {
-      timer?.cancel();
       if (mounted && ticket == activeTicket) {
+        timer?.cancel();
         setState(() {
           ticket = null;
           error = e.toString().replaceFirst('Exception: ', '');
@@ -113,61 +110,23 @@ class _AccountRecoveryPageState extends State<AccountRecoveryPage> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  username == null ? '使用此前绑定的 GitHub 验证身份。' : '账号 · $username',
+                  authorized ? '请在浏览器中设置新密码，完成后返回登录。' : '使用此前绑定的 GitHub 验证身份。',
                   style: const TextStyle(color: muted),
                 ),
                 const SizedBox(height: 28),
-                if (username != null) ...[
-                  TextField(
-                    controller: password,
-                    obscureText: true,
-                    maxLength: 128,
-                    autofillHints: const [AutofillHints.newPassword],
-                    decoration: const InputDecoration(
-                      labelText: '新密码（至少 8 位）',
-                      counterText: '',
-                    ),
-                    textInputAction: TextInputAction.next,
+                FilledButton(
+                  onPressed: busy || ticket != null ? null : begin,
+                  child: Text(
+                    ticket != null
+                        ? (authorized ? '等待设置新密码' : '等待 GitHub 授权')
+                        : '通过 GitHub 验证',
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: confirmation,
-                    obscureText: true,
-                    maxLength: 128,
-                    decoration: const InputDecoration(
-                      labelText: '确认新密码',
-                      counterText: '',
-                    ),
+                ),
+                if (ticket != null)
+                  TextButton(
+                    onPressed: busy ? null : begin,
+                    child: const Text('重新打开授权'),
                   ),
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: busy
-                        ? null
-                        : () => run(() async {
-                            if (password.text != confirmation.text) {
-                              throw Exception('两次密码不一致');
-                            }
-                            final name = await widget.store.resetPassword(
-                              ticket!,
-                              password.text,
-                            );
-                            if (context.mounted) Navigator.pop(context, name);
-                          }),
-                    child: Text(busy ? '请稍候' : '更新密码'),
-                  ),
-                ] else ...[
-                  FilledButton(
-                    onPressed: busy || ticket != null ? null : () => run(begin),
-                    child: Text(
-                      ticket != null ? '等待 GitHub 授权' : '通过 GitHub 验证',
-                    ),
-                  ),
-                  if (ticket != null)
-                    TextButton(
-                      onPressed: busy ? null : () => run(begin),
-                      child: const Text('重新打开授权'),
-                    ),
-                ],
                 if (error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 16),

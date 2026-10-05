@@ -67,6 +67,6 @@ npm start
 
 服务使用 `/v2` 协议，与旧版示例 `/v1` 独立：账号隔离、版本冲突检测、任务删除墓碑、GitHub 一对一绑定。未绑定 GitHub 时同步接口拒绝读取和写入；已有云端副本保留。GitHub 绑定不是直接登录方式。
 
-找回账号：客户端调用 `POST /v2/github/recover`，在浏览器使用已绑定 GitHub 验证身份，通过 `POST /v2/github/recovery-status` 查询结果，再用一次性票据调用 `POST /v2/auth/reset` 设置新密码。找回流程同样使用 PKCE 与一次性 state，票据十分钟过期，服务器只存票据摘要。更新密码撤销该账号所有旧会话，保持账号 ID 与已有数据不变。尚无邮箱验证和运营管理界面。
+找回账号：客户端调用 `POST /v2/github/recover`，在浏览器使用已绑定 GitHub 验证身份，并在该浏览器设置新密码。只有完成授权的浏览器持有 HttpOnly、Secure、SameSite=Strict Cookie；表单还校验 Origin 与 CSRF，一次性凭据十分钟过期。客户端仅用 `POST /v2/github/recovery-status` 查询进度，不会获得密码重置权限。更新密码撤销该账号所有旧会话，保持账号 ID 与已有数据不变。尚无邮箱验证和运营管理界面。
 
 验证：`node --test test.mjs`。测试使用内存数据库和模拟 GitHub 响应，不会请求真实账号。

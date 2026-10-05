@@ -528,14 +528,6 @@ class AppStore extends ChangeNotifier {
   Future<Map<String, dynamic>> recoveryStatus(String ticket) =>
       request('POST', '/v2/github/recovery-status', {'ticket': ticket});
 
-  Future<String> resetPassword(String ticket, String password) async {
-    final result = await request('POST', '/v2/auth/reset', {
-      'ticket': ticket,
-      'password': password,
-    });
-    return result['username'] as String;
-  }
-
   Future<void> openCalendar() async {
     if (!Platform.isWindows || !entered || _openingCalendar) return;
     _openingCalendar = true;

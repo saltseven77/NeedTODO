@@ -30,6 +30,17 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
   if (!db.prepare('PRAGMA table_info(bindings)').all().some(column => column.name === 'verifier')) {
     db.exec('ALTER TABLE bindings ADD COLUMN verifier TEXT');
   }
+  for (const column of ['browser', 'csrf']) {
+    if (!db.prepare('PRAGMA table_info(recoveries)').all().some(field => field.name === column)) {
+      db.exec(`ALTER TABLE recoveries ADD COLUMN ${column} TEXT`);
+    }
+  }
+  const escape = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const recoveryCookie = '__Host-needtodo-recovery';
+  function recoveryPage(res, {status=200, username='', csrf='', error='', done=false}) {
+    res.writeHead(status, {'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"});
+    res.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>找回账号 · 泥土豆</title><style>body{margin:0;background:#fff;color:#292c32;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:grid;place-items:center}main{box-sizing:border-box;width:100%;max-width:406px;padding:28px}h1{font-size:24px;font-weight:400}p{color:#6e747c;line-height:1.7;font-size:13px}form{display:grid;gap:12px;margin-top:28px}input,button{box-sizing:border-box;width:100%;font:inherit;border:0;border-radius:10px;padding:14px 16px}input{background:#f0f1f4}button{background:#477cae;color:#fff;cursor:pointer;margin-top:8px}.error{color:#b43e3e}</style><main><h1>${done?'密码已更新':'找回账号'}</h1><p>${done?'请返回泥土豆，使用新密码登录。':'账号 · '+escape(username)}</p>${error?'<p class="error">'+escape(error)+'</p>':''}${!done&&csrf?`<form method="post" action="/v2/github/reset"><input type="hidden" name="csrf" value="${escape(csrf)}"><input type="password" name="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="新密码（至少 8 位）" aria-label="新密码" required><input type="password" name="confirmation" minlength="8" maxlength="128" autocomplete="new-password" placeholder="确认新密码" aria-label="确认新密码" required><button>更新密码</button></form><p>仅在你本人发起找回时更新密码。不要向他人提供密码。</p>`:''}</main></html>`);
+  }
   const limits = new Map();
   let hashing = 0;
   async function passwordDigest(password, salt, settings = passwordSettings) {
@@ -211,27 +222,41 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
       if (typeof b.ticket !== 'string') throw fail(400, '授权无效');
       const pending = db.prepare('SELECT * FROM recoveries WHERE ticket=? AND expires>?').get(hash(b.ticket), Date.now());
       if (!pending) throw fail(410, '授权已过期');
-      const u = pending.status === 'complete' ? db.prepare('SELECT * FROM users WHERE id=?').get(pending.uid) : null;
+      const u = pending.status === 'consumed' ? db.prepare('SELECT * FROM users WHERE id=?').get(pending.uid) : null;
       return reply(200, {status: pending.status, ...(u ? {username: u.username} : {})});
     }
     if (url.pathname === '/v2/auth/reset' && req.method === 'POST') {
+      throw fail(403, '请在完成 GitHub 验证的浏览器中设置新密码');
+    }
+    if (url.pathname === '/v2/github/reset' && req.method === 'POST') {
       throttle(req, 'reset', 10);
-      const b = await body(req);
-      if (typeof b.ticket !== 'string') throw fail(400, '授权无效');
-      const pending = db.prepare('SELECT * FROM recoveries WHERE ticket=? AND expires>? AND status=?').get(hash(b.ticket), Date.now(), 'complete');
-      if (!pending) throw fail(410, '请重新通过 GitHub 验证身份');
+      if (req.headers.origin !== new URL(process.env.PUBLIC_URL).origin) throw fail(403, '验证来源无效');
+      const secret = (req.headers.cookie || '').split(';').map(v=>v.trim()).find(v=>v.startsWith(recoveryCookie+'='))?.slice(recoveryCookie.length+1);
+      const pending = secret && db.prepare('SELECT * FROM recoveries WHERE browser=? AND expires>? AND status=?').get(hash(secret), Date.now(), 'complete');
+      if (!pending) return recoveryPage(res,{status:410,error:'授权已过期，请返回泥土豆重新验证身份。'});
+      let size=0;const chunks=[];
+      for await(const chunk of req){size+=chunk.length;if(size>16384)throw fail(413,'请求过大');chunks.push(chunk);}
+      const b=Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString('utf8')));
+      if (!b.csrf || hash(b.csrf)!==pending.csrf) throw fail(403,'验证无效');
       const u = db.prepare('SELECT * FROM users WHERE id=?').get(pending.uid);
-      const {password} = credentials({username: u.username, password: b.password});
-      // Claim before hashing: a recovery ticket can reset a password only once.
-      db.prepare('UPDATE recoveries SET status=? WHERE state=?').run('resetting', pending.state);
+      let password;
+      try {
+        if(b.password!==b.confirmation)throw fail(400,'两次密码不一致');
+        ({password}=credentials({username: u.username, password: b.password}));
+      } catch(e) {return recoveryPage(res,{status:e.status||400,username:u.username,csrf:b.csrf,error:e.message});}
+      // Only the browser completing OAuth holds this secret, never the polling client.
+      const claimed = db.prepare('UPDATE recoveries SET status=? WHERE state=? AND status=? AND expires>?').run('resetting', pending.state, 'complete', Date.now()).changes;
+      if (!claimed) return recoveryPage(res,{status:410,error:'授权已过期，请重新验证身份。'});
       try {
         const salt = random(), derived = await passwordDigest(password, salt);
         db.exec('BEGIN IMMEDIATE');
         db.prepare('UPDATE users SET salt=?,password=?,password_params=? WHERE id=?').run(salt, derived.toString('hex'), JSON.stringify(passwordSettings), u.id);
         db.prepare('DELETE FROM sessions WHERE uid=?').run(u.id);
-        db.prepare('UPDATE recoveries SET status=? WHERE uid=?').run('consumed', u.id);
+        db.prepare('UPDATE recoveries SET status=? WHERE uid=? AND state!=?').run('failed', u.id, pending.state);
+        db.prepare('UPDATE recoveries SET status=?,browser=NULL,csrf=NULL WHERE state=?').run('consumed', pending.state);
         db.exec('COMMIT');
-        return reply(200, {username: u.username});
+        res.setHeader('set-cookie', `${recoveryCookie}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
+        return recoveryPage(res,{done:true});
       } catch (e) {
         if (db.isTransaction) db.exec('ROLLBACK');
         db.prepare('UPDATE recoveries SET status=? WHERE state=? AND status=?').run('failed', pending.state, 'resetting');
@@ -261,9 +286,12 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
         const result = await githubFetch('https://api.github.com/user', {headers:{authorization:`Bearer ${token.access_token}`,accept:'application/vnd.github+json','user-agent':'NeedTODO'}, signal:AbortSignal.timeout(15000)});
         const profile = await result.json(); if (!result.ok || !Number.isSafeInteger(profile.id) || typeof profile.login !== 'string') throw fail(502, 'GitHub 账号无效');
         if (table === 'recoveries') {
-          const u = db.prepare('SELECT id FROM users WHERE github_id=?').get(String(profile.id));
+          const u = db.prepare('SELECT id,username FROM users WHERE github_id=?').get(String(profile.id));
           if (!u) throw fail(404, '此 GitHub 尚未绑定泥土豆账号');
-          db.prepare('UPDATE recoveries SET uid=?,status=? WHERE state=?').run(u.id, 'complete', key);
+          const browser = random(), csrf = random();
+          db.prepare('UPDATE recoveries SET uid=?,status=?,browser=?,csrf=? WHERE state=?').run(u.id, 'complete', hash(browser), hash(csrf), key);
+          res.setHeader('set-cookie', `${recoveryCookie}=${browser}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=600`);
+          return recoveryPage(res,{username:u.username,csrf});
         } else {
           let changed;
           try { changed = db.prepare('UPDATE users SET github_id=?,github_login=? WHERE id=? AND github_id IS NULL').run(String(profile.id),profile.login,pending.uid).changes; } catch { throw fail(409, '该 GitHub 已绑定其他账号'); }

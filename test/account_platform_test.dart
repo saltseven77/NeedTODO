@@ -10,6 +10,7 @@ import 'package:needtodo/app.dart';
 import 'package:needtodo/model.dart';
 import 'package:needtodo/platform_services.dart';
 import 'package:needtodo/store.dart';
+import 'package:needtodo/ui/account_recovery.dart';
 
 import 'memory_storage.dart';
 import 'calendar_reminder_test.dart' show RecordingNotifications;
@@ -27,6 +28,20 @@ class AccountStore extends AppStore {
     if (method == 'GET') return {'revision': 0, 'document': null};
     return {'revision': 1, 'document': body?['document']};
   }
+}
+
+class RecoveryStore extends AppStore {
+  String status = 'complete';
+  RecoveryStore() : super(MemoryStorage());
+  @override
+  Future<Map<String, dynamic>> startRecovery() async => {
+    'ticket': 'fixture-only',
+  };
+  @override
+  Future<Map<String, dynamic>> recoveryStatus(String ticket) async => {
+    'status': status,
+    if (status == 'consumed') 'username': 'recovered_user',
+  };
 }
 
 class AndroidPermissions extends AndroidFlutterLocalNotificationsPlugin {
@@ -89,6 +104,47 @@ class AndroidNotifications extends RecordingNotifications {
 }
 
 void main() {
+  testWidgets(
+    'recovery waits for browser password reset before returning to login',
+    (tester) async {
+      final store = RecoveryStore();
+      String? returned;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  returned = await Navigator.push<String>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AccountRecoveryPage(store: store),
+                    ),
+                  );
+                },
+                child: const Text('Open recovery'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open recovery'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('通过 GitHub 验证'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('请在浏览器中设置新密码'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(returned, isNull);
+      store.status = 'consumed';
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(returned, 'recovered_user');
+      await tester.pumpWidget(const SizedBox());
+      await store.shutdown();
+    },
+  );
   test(
     'notification taps survive cold launch and are delivered only once',
     () async {
