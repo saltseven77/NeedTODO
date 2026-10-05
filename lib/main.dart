@@ -111,16 +111,24 @@ Future<void> main(List<String> args) async {
       }
     }
     store.onDocumentChanged = () {
-      services?.publish(store.entered ? store.document : Document()).catchError(
-        (Object e) {
-          unawaited(log(e, null));
-          store.setError('系统通知更新失败；程序运行时仍会弹出提醒');
-        },
-      );
+      services
+          ?.publish(
+            store.entered ? store.document : Document(),
+            widgetAppearance: store.widgetAppearance,
+          )
+          .then((_) => store.clearNotificationError())
+          .catchError((Object e) {
+            unawaited(log(e, null));
+            store.setError('系统通知更新失败；程序运行时仍会弹出提醒');
+          });
     };
     services?.onError = (e) {
       unawaited(log(e, null));
       store.setError('提醒显示失败，请检查后重试');
+    };
+    services?.onWidgetError = (e) {
+      unawaited(log(e, null));
+      store.setError('桌面小组件更新失败，请重新添加');
     };
     store.onReminderTest = services?.testReminder;
     // Read-only migration of the old desktop format into the new local workspace.

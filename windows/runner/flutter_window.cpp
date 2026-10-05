@@ -104,6 +104,7 @@ void FlutterWindow::ShowTrayMenu() {
   AppendMenu(menu, MF_STRING, 1, L"打开清单");
   AppendMenu(menu, MF_STRING, 2, L"桌面月历");
   AppendMenu(menu, MF_STRING, 3, L"悬浮球");
+  AppendMenu(menu, MF_STRING, 5, L"关闭悬浮球");
   AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenu(menu, MF_STRING, 4, L"退出软件");
   POINT position{};

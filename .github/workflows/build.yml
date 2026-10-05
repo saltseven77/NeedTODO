@@ -87,6 +87,17 @@ jobs:
         run: |
           if [ -f android/key.properties ]; then mode=release; else mode=debug; fi
           flutter build apk --$mode --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL || 'https://api.whatineedtodotoday.xyz' }}
+      - name: Verify packaged notification resource
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          tools = sorted((Path(os.environ['ANDROID_HOME']) / 'build-tools').glob('*/aapt2'))
+          for apk in Path('build/app/outputs/flutter-apk').glob('*.apk'):
+              output = subprocess.check_output([str(tools[-1]), 'dump', 'resources', str(apk)], text=True)
+              if 'drawable/ic_notification' not in output:
+                  raise SystemExit('Notification icon was removed from the APK')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: NeedTODO-Android

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -80,6 +81,70 @@ class AppStore extends ChangeNotifier {
   final String api;
   final http.Client client = http.Client();
   Document document = Document();
+  Map<String, dynamic> _deviceSettings = {}, _sharedStyles = {};
+  String get _settingsKey => '$_key-device-settings';
+  Appearance get widgetAppearance => _deviceSettings['widgets'] == null
+      ? Appearance(
+          radius: 12,
+          paletteId: 'widget',
+          palettes: [
+            Palette(
+              'widget',
+              '默认',
+              const Color(0xffffffff),
+              const Color(0xff292c32),
+              document.list.palette.accent,
+            ),
+          ],
+        )
+      : Appearance.fromJson(object(_deviceSettings['widgets']));
+
+  void _captureShared(Document shared) {
+    _sharedStyles = {
+      'list': shared.list.toJson(),
+      'calendar': shared.calendar.toJson(),
+      'reminders': shared.reminders.toJson(),
+      'appearanceUpdated': shared.appearanceUpdated.toIso8601String(),
+    };
+  }
+
+  Document _canonical(Document effective) {
+    final copy = effective.clone();
+    if (_sharedStyles.isNotEmpty) {
+      copy.list = Appearance.fromJson(object(_sharedStyles['list']));
+      copy.calendar = Appearance.fromJson(object(_sharedStyles['calendar']));
+      copy.reminders = ReminderStyle.fromJson(
+        object(_sharedStyles['reminders']),
+      );
+      copy.appearanceUpdated = DateTime.parse(
+        _sharedStyles['appearanceUpdated'],
+      );
+    }
+    return copy;
+  }
+
+  void _acceptShared(Document shared) {
+    _captureShared(shared);
+    document = shared;
+    if (_deviceSettings['list'] != null) {
+      document.list = Appearance.fromJson(object(_deviceSettings['list']));
+    }
+    if (_deviceSettings['calendar'] != null) {
+      document.calendar = Appearance.fromJson(
+        object(_deviceSettings['calendar']),
+      );
+    }
+    if (_deviceSettings['reminders'] != null) {
+      document.reminders = ReminderStyle.fromJson(
+        object(_deviceSettings['reminders']),
+      );
+    }
+  }
+
+  Future<void> _loadDeviceSettings() async {
+    _deviceSettings = await storage.read(_settingsKey) ?? {};
+  }
+
   Map<String, dynamic>? account;
   bool local = false, ready = false, syncing = false;
   String? error;
@@ -161,14 +226,16 @@ class AppStore extends ChangeNotifier {
         if (_token.isEmpty) account = null;
       }
       final saved = await storage.read(_key);
+      await _loadDeviceSettings();
       try {
         if (saved != null) {
-          document = Document.fromJson(object(saved['document'] ?? saved));
+          _acceptShared(Document.fromJson(object(saved['document'] ?? saved)));
           revision = saved['revision'] ?? 0;
         }
       } catch (_) {
         setError('数据无法读取，已保留原文件');
       }
+      if (saved == null) _acceptShared(Document());
       ready = true;
       _timer = Timer.periodic(const Duration(seconds: 45), (_) {
         if (canCloudSync) sync().catchError((Object e) => setError(e));
@@ -192,9 +259,17 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _persist(Document next) async {
+  void clearNotificationError() {
+    if (error?.startsWith('系统通知') != true && error != '提醒暂不可用，请检查系统通知权限') {
+      return;
+    }
+    error = null;
+    notifyListeners();
+  }
+
+  Future<void> _persist(Document next, {bool shared = false}) async {
     await storage.write(_key, {
-      'document': next.toJson(),
+      'document': (shared ? next : _canonical(next)).toJson(),
       'revision': revision,
     });
   }
@@ -225,7 +300,10 @@ class AppStore extends ChangeNotifier {
       return;
     }
     final op = _writes.then((_) async {
+      if (_sharedStyles.isEmpty) _captureShared(document);
       final next = document.clone();
+      final settings = {..._deviceSettings};
+      bool settingsOnly = false;
       switch (action['type']) {
         case 'journal':
           final key = action['week'] as String;
@@ -261,21 +339,26 @@ class AppStore extends ChangeNotifier {
             next.tasks[index] = task;
           }
         case 'appearance':
+          settingsOnly = true;
           final appearance = Appearance.fromJson(object(action['value']))
             ..updated = DateTime.now().toUtc();
           if (action['layout'] == 'calendar') {
             next.calendar = appearance;
+            settings['calendar'] = appearance.toJson();
           } else {
             next.list = appearance;
+            settings['list'] = appearance.toJson();
           }
           next.appearanceUpdated = DateTime.now().toUtc();
         case 'preferences':
+          settingsOnly = true;
           final profiles = object(action['profiles']);
           for (final entry in profiles.entries) {
             final appearance = Appearance.fromJson(object(entry.value))
               ..updated = DateTime.now().toUtc();
             if (entry.key == 'calendar') next.calendar = appearance;
             if (entry.key == 'list') next.list = appearance;
+            settings[entry.key] = appearance.toJson();
           }
           if (profiles.isNotEmpty) {
             next.appearanceUpdated = DateTime.now().toUtc();
@@ -283,6 +366,11 @@ class AppStore extends ChangeNotifier {
           if (action['reminders'] != null) {
             next.reminders = ReminderStyle.fromJson(object(action['reminders']))
               ..updated = DateTime.now().toUtc();
+            settings['reminders'] = next.reminders.toJson();
+          }
+          if (action['widgets'] != null) {
+            settings['widgets'] = Appearance.fromJson(object(action['widgets']))
+                .toJson();
           }
         case 'holiday':
           final h = Holiday.fromJson(object(action['value']));
@@ -291,7 +379,12 @@ class AppStore extends ChangeNotifier {
         default:
           throw Exception('未知操作');
       }
-      await _persist(next);
+      if (settingsOnly) {
+        await storage.write(_settingsKey, settings);
+        _deviceSettings = settings;
+      } else {
+        await _persist(next);
+      }
       document = next;
       generation++;
       notifyListeners();
@@ -321,7 +414,8 @@ class AppStore extends ChangeNotifier {
     account = null;
     local = true;
     revision = 0;
-    document = next;
+    await _loadDeviceSettings();
+    _acceptShared(next);
     generation++;
     notifyListeners();
     onDocumentChanged?.call();
@@ -384,9 +478,10 @@ class AppStore extends ChangeNotifier {
     revision = 0;
     generation++;
     final saved = await storage.read(_key);
-    document = saved == null
-        ? Document()
-        : Document.fromJson(object(saved['document']));
+    await _loadDeviceSettings();
+    _acceptShared(
+      saved == null ? Document() : Document.fromJson(object(saved['document'])),
+    );
     revision = saved?['revision'] ?? 0;
     notifyListeners();
     onDocumentChanged?.call();
@@ -415,6 +510,8 @@ class AppStore extends ChangeNotifier {
     account = null;
     local = false;
     document = Document();
+    _deviceSettings = {};
+    _sharedStyles = {};
     generation++;
     notifyListeners();
     onDocumentChanged?.call();
@@ -431,9 +528,9 @@ class AppStore extends ChangeNotifier {
         if (account?['id'] != uid) return;
         final sentGeneration = generation;
         final merged = remote['document'] == null
-            ? document.clone()
+            ? _canonical(document)
             : mergeDocuments(
-                document,
+                _canonical(document),
                 Document.fromJson(object(remote['document'])),
               );
         final response = await request('PUT', '/v2/sync', {
@@ -449,16 +546,16 @@ class AppStore extends ChangeNotifier {
           if (account?['id'] != uid) return;
           final next = sentGeneration == generation
               ? merged
-              : mergeDocuments(document, merged);
+              : mergeDocuments(_canonical(document), merged);
           final previousRevision = revision;
           revision = response['revision'];
           try {
-            await _persist(next);
+            await _persist(next, shared: true);
           } catch (_) {
             revision = previousRevision;
             rethrow;
           }
-          document = next;
+          _acceptShared(next);
           generation++;
           notifyListeners();
           onDocumentChanged?.call();

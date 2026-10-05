@@ -19,15 +19,22 @@ class MainActivity : FlutterActivity() {
                     val json = call.arguments as? String ?: "{}"
                     getSharedPreferences("needtodo_widget", MODE_PRIVATE).edit().putString("snapshot", json).apply()
                     CalendarWidget.updateAll(this)
+                    AgendaWidget.updateAll(this)
                     result.success(null)
                 }
                 "widgetPin" -> {
                     val manager = AppWidgetManager.getInstance(this)
                     if (Build.VERSION.SDK_INT >= 26 && manager.isRequestPinAppWidgetSupported) {
-                        result.success(manager.requestPinAppWidget(ComponentName(this, CalendarWidget::class.java), null, null))
+                        val provider = if (call.arguments == "agenda") AgendaWidget::class.java else CalendarWidget::class.java
+                        result.success(manager.requestPinAppWidget(ComponentName(this, provider), null, null))
                     } else result.success(false)
                 }
                 "widgetLaunch" -> { result.success(intent?.getStringExtra("date")); intent?.removeExtra("date") }
+                "widgetLaunchAction" -> {
+                    val date = intent?.getStringExtra("date")
+                    result.success(if(date == null) null else mapOf("date" to date,"add" to intent.getBooleanExtra("add",false)))
+                    intent?.removeExtra("date");intent?.removeExtra("add")
+                }
                 else -> result.notImplemented()
             }
         }
@@ -35,6 +42,6 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("date")?.let { channel?.invokeMethod("openDate", it) }
+        intent.getStringExtra("date")?.let { channel?.invokeMethod("widgetAction", mapOf("date" to it,"add" to intent.getBooleanExtra("add",false))) }
     }
 }

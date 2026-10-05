@@ -379,11 +379,22 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
 
       native.setMethodCallHandler((call) async {
         if (call.method == 'openDate') openDate(call.arguments as String?);
+        if (call.method == 'widgetAction') {
+          await native.invokeMethod('widgetLaunchAction');
+          openWidget(object(call.arguments));
+        }
       });
-      native
-          .invokeMethod<String>('widgetLaunch')
-          .then(openDate)
-          .catchError((Object _) {});
+      if (Platform.isAndroid) {
+        native
+            .invokeMethod<dynamic>('widgetLaunchAction')
+            .then((value) => openWidget(object(value)))
+            .catchError((Object _) {});
+      } else {
+        native
+            .invokeMethod<String>('widgetLaunch')
+            .then(openDate)
+            .catchError((Object _) {});
+      }
       final appLinks = AppLinks();
       appLinks
           .getInitialLink()
@@ -399,6 +410,21 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
 
   void refresh() {
     if (mounted) setState(() {});
+  }
+
+  void openWidget(Map<String, dynamic> value) {
+    final date = DateTime.tryParse(value['date'] as String? ?? '');
+    if (date == null || !mounted) return;
+    setState(() {
+      selected = date;
+      calendar = true;
+      journal = false;
+    });
+    if (value['add'] == true) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) edit(null, date);
+      });
+    }
   }
 
   Future<void> showReminders(List<Todo> tasks, ReminderStyle style) {
@@ -428,7 +454,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     widget.services?.setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
       run(() async {
-        await widget.services?.publish(store.document);
+        await widget.services?.publish(
+          store.document,
+          widgetAppearance: store.widgetAppearance,
+        );
       });
       run(() async {
         await store.refreshAccount();
@@ -479,6 +508,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           '设置',
           SettingsView(
             store: store,
+            services: widget.services,
             layout: layout,
             desktop: widget.desktop,
             preview: (v) {
@@ -592,35 +622,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           onTap: () => run(d!.expand),
           onSecondaryTap: () => run(() => native.invokeMethod('trayMenu')),
           onLongPress: () => run(() => native.invokeMethod('trayMenu')),
-          child: Stack(
-            children: [
-              Center(
-                child: Identity(
-                  data: store.document.list.floatingImage,
-                  size: 60,
-                ),
-              ),
-              Positioned(
-                top: 0,
-                right: 0,
-                child: SizedBox.square(
-                  dimension: 22,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    tooltip: '隐藏悬浮球',
-                    onPressed: () => run(d!.hideToTray),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withValues(alpha: .9),
-                    ),
-                    icon: const Icon(
-                      CupertinoIcons.xmark,
-                      size: 11,
-                      color: muted,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          child: Center(
+            child: Identity(data: store.document.list.floatingImage, size: 60),
           ),
         ),
       );
@@ -646,7 +649,9 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       );
     }
     Widget body = Scaffold(
-      backgroundColor: d == null ? panel : Colors.transparent,
+      backgroundColor: d == null
+          ? p.background.withValues(alpha: 1)
+          : Colors.transparent,
       body: SafeArea(
         child: Surface(
           appearance: a,
@@ -689,6 +694,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         d.locked ? '解锁桌面' : '锁定桌面',
                         d.busy ? null : () => run(() => d.setLocked(!d.locked)),
                         color: d.locked ? p.accent : p.text,
+                        compact: true,
                       )
                     else
                       ActionIcon(
@@ -702,6 +708,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             : '打开桌面月历',
                         toggleCalendar,
                         color: p.text,
+                        compact: d != null,
                       ),
                     if (!calendar)
                       ActionIcon(
@@ -711,12 +718,14 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         journal ? '返回清单' : '日记',
                         () => setState(() => journal = !journal),
                         color: journal ? p.accent : p.text,
+                        compact: d != null,
                       ),
                     ActionIcon(
                       CupertinoIcons.slider_horizontal_3,
                       '设置',
                       openSettings,
                       color: p.text,
+                      compact: d != null,
                     ),
                     if (d != null && !d.locked)
                       ActionIcon(
@@ -726,6 +735,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         d.maximized ? '还原窗口' : '最大化窗口',
                         d.locked || d.busy ? null : () => run(d.toggleMaximize),
                         color: p.text,
+                        compact: true,
                       ),
                     if (d != null)
                       ActionIcon(
@@ -733,6 +743,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         '收起',
                         () => run(calendar ? d.hideCalendar : d.collapse),
                         color: p.text,
+                        compact: true,
                       ),
                     if (d != null)
                       ActionIcon(
@@ -740,6 +751,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         '关闭窗口',
                         d.onWindowClose,
                         color: p.text,
+                        compact: true,
                       ),
                   ],
                 ),

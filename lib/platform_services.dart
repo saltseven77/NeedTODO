@@ -80,6 +80,7 @@ class PlatformServices {
   Document? _latest;
   Future<void> Function(List<Todo>, ReminderStyle)? _onReminder;
   void Function(Object)? onError;
+  void Function(Object)? onWidgetError;
   set onReminder(Future<void> Function(List<Todo>, ReminderStyle)? callback) {
     _onReminder = callback;
     _arm();
@@ -216,7 +217,15 @@ class PlatformServices {
   }
 
   bool initialized = false;
-  Future<void> initialize() async {
+  Future<void>? _initializing;
+  Future<void> initialize() {
+    if (initialized) return Future.value();
+    return _initializing ??= _initialize().whenComplete(
+      () => _initializing = null,
+    );
+  }
+
+  Future<void> _initialize() async {
     final saved = await _deliveryStorage?.read('reminder-deliveries');
     _delivered.addAll((saved?['keys'] as List? ?? []).whereType<String>());
     tzdata.initializeTimeZones();
@@ -238,6 +247,20 @@ class PlatformServices {
           _openTask(response.payload),
     );
     if (ready != true) throw StateError('系统通知初始化失败');
+    if (isAndroid) {
+      await notifications
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.createNotificationChannel(
+            const AndroidNotificationChannel(
+              'needtodo_schedule_alerts_v2',
+              '日程提醒',
+              description: '即将开始的日程，声音与顶部横幅提醒',
+              importance: Importance.max,
+            ),
+          );
+    }
     initialized = true;
     if (isAndroid || Platform.isIOS) {
       final launch = await notifications.getNotificationAppLaunchDetails();
@@ -248,6 +271,7 @@ class PlatformServices {
   }
 
   Future<void> permission() async {
+    if (!initialized) await initialize();
     if (isAndroid) {
       final android = notifications
           .resolvePlatformSpecificImplementation<
@@ -335,31 +359,39 @@ class PlatformServices {
     );
   }
 
-  Future<void> publish(Document d) {
+  Future<void> publish(Document d, {Appearance? widgetAppearance}) {
     final snapshot = d.clone();
     _latest = snapshot;
     _arm();
+    final widgetTheme = widgetAppearance?.clone();
     final op = _queue.then((_) async {
       if (isAndroid || Platform.isIOS) {
-        await native.invokeMethod(
-          'widgetUpdate',
-          jsonEncode({
-            'calendar': snapshot.calendar.toJson(),
-            'tasks': snapshot.tasks
-                .where((t) => !t.deleted && !t.done && t.scope == 'day')
-                .map(
-                  (t) => {
-                    'id': t.id,
-                    'title': t.title,
-                    'date': t.date,
-                    'scope': t.scope,
-                  },
-                )
-                .toList(),
-          }),
-        );
+        try {
+          await native.invokeMethod(
+            'widgetUpdate',
+            jsonEncode({
+              'calendar': snapshot.calendar.toJson(),
+              'widgetAppearance': widgetTheme?.toJson(),
+              'tasks': snapshot.tasks
+                  .where((t) => !t.deleted && !t.done && t.scope == 'day')
+                  .map(
+                    (t) => {
+                      'id': t.id,
+                      'title': t.title,
+                      'date': t.date,
+                      'scope': t.scope,
+                      'startMinute': t.startMinute,
+                      'endMinute': t.endMinute,
+                    },
+                  )
+                  .toList(),
+            }),
+          );
+        } catch (e) {
+          onWidgetError?.call(e);
+        }
       }
-      if (!initialized) throw StateError('系统通知未初始化');
+      if (!initialized) await initialize();
       final future =
           snapshot.tasks
               .where(
@@ -902,6 +934,8 @@ class DesktopController extends ChangeNotifier with WindowListener {
             if (!collapsed) await collapse();
           case 4:
             await quit();
+          case 5:
+            await hideToTray();
         }
       });
     });

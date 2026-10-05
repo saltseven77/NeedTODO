@@ -115,18 +115,29 @@ class ActionIcon extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
   final Color? color;
+  final bool compact;
   const ActionIcon(
     this.icon,
     this.label,
     this.onPressed, {
     super.key,
     this.color,
+    this.compact = false,
   });
   @override
   Widget build(BuildContext context) => IconButton(
     tooltip: label,
     onPressed: onPressed,
-    icon: Icon(icon, size: 20, color: color),
+    style: compact
+        ? IconButton.styleFrom(
+            minimumSize: const Size.square(28),
+            maximumSize: const Size.square(28),
+            padding: const EdgeInsets.all(3),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.standard,
+          )
+        : null,
+    icon: Icon(icon, size: compact ? 18 : 20, color: color),
   );
 }
 

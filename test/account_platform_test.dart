@@ -1,4 +1,7 @@
 import 'dart:async';
+
+import 'package:flutter/gestures.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -46,11 +49,21 @@ class RecoveryStore extends AppStore {
 
 class AndroidPermissions extends AndroidFlutterLocalNotificationsPlugin {
   bool exact = false;
+  final channels = <AndroidNotificationChannel>[];
+  @override
+  Future<void> createNotificationChannel(
+    AndroidNotificationChannel channel,
+  ) async {
+    channels.add(channel);
+  }
+
   @override
   Future<bool?> canScheduleExactNotifications() async => exact;
 }
 
 class AndroidNotifications extends RecordingNotifications {
+  bool failFirstInitialize = false;
+  int initializeCalls = 0;
   final permissions = AndroidPermissions();
   final modes = <AndroidScheduleMode>[];
   DidReceiveNotificationResponseCallback? tapped;
@@ -61,6 +74,10 @@ class AndroidNotifications extends RecordingNotifications {
     DidReceiveBackgroundNotificationResponseCallback?
     onDidReceiveBackgroundNotificationResponse,
   }) async {
+    initializeCalls++;
+    if (failFirstInitialize && initializeCalls == 1) {
+      throw PlatformException(code: 'invalid_icon');
+    }
     tapped = onDidReceiveNotificationResponse;
     return true;
   }
@@ -104,6 +121,101 @@ class AndroidNotifications extends RecordingNotifications {
 }
 
 void main() {
+  testWidgets('a widget rendering error cannot block reminder scheduling', (
+    tester,
+  ) async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(native, (call) async {
+      throw PlatformException(code: 'widget-render');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(native, null));
+    final fake = AndroidNotifications(),
+        services = PlatformServices(
+          notifications: AndroidNotifications(),
+          android: true,
+        );
+    final working = PlatformServices(notifications: fake, android: true);
+    var errors = 0;
+    working.onWidgetError = (_) => errors++;
+    await working.publish(
+      Document(
+        tasks: [
+          Todo(
+            title: 'Reminder survives widget error',
+            date: '2026-10-05',
+            reminder: DateTime.now().add(const Duration(hours: 1)),
+          ),
+        ],
+      ),
+    );
+    expect(errors, 1);
+    expect(fake.pending.length, 1);
+    expect(working.initialized, true);
+    working.dispose();
+    services.dispose();
+  });
+  testWidgets(
+    'widget refresh survives notification failure and initialization retries',
+    (tester) async {
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(native, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(native, null));
+      final fake = AndroidNotifications()..failFirstInitialize = true;
+      final services = PlatformServices(notifications: fake, android: true);
+      await expectLater(
+        services.publish(Document()),
+        throwsA(isA<PlatformException>()),
+      );
+      expect(calls, contains('widgetUpdate'));
+      expect(services.initialized, false);
+      await services.publish(Document());
+      expect(services.initialized, true);
+      expect(fake.initializeCalls, 2);
+      expect(fake.permissions.channels.single.importance, Importance.max);
+      services.dispose();
+    },
+  );
+
+  testWidgets(
+    'floating ball has no close badge and right click opens its menu',
+    (tester) async {
+      tester.view.physicalSize = const Size(68, 68);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(native, (call) async {
+        calls.add(call.method);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(native, null));
+      final store = AppStore(MemoryStorage())
+        ..ready = true
+        ..local = true;
+      final desktop = DesktopController(MemoryStorage(), calendar: false)
+        ..collapsed = true;
+      await tester.pumpWidget(NeedTodoApp(store: store, desktop: desktop));
+      expect(find.byTooltip('隐藏悬浮球'), findsNothing);
+      expect(find.byType(IconButton), findsNothing);
+      await tester.tap(
+        find.byType(GestureDetector),
+        buttons: kSecondaryMouseButton,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(calls, contains('trayMenu'));
+      await tester.pumpWidget(const SizedBox());
+      await store.shutdown();
+    },
+  );
   testWidgets(
     'recovery waits for browser password reset before returning to login',
     (tester) async {
@@ -274,7 +386,11 @@ void main() {
       expect(fake.modes, [AndroidScheduleMode.inexactAllowWhileIdle]);
       expect(fake.details!.android!.importance, Importance.max);
       expect(fake.details!.android!.priority, Priority.high);
-      expect(snapshots.single.keys.toSet(), {'calendar', 'tasks'});
+      expect(snapshots.single.keys.toSet(), {
+        'calendar',
+        'widgetAppearance',
+        'tasks',
+      });
       expect(snapshots.single['tasks'].single['title'], 'Android notification');
       fake.permissions.exact = true;
       await services.publish(doc);

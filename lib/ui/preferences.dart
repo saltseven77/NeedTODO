@@ -9,6 +9,7 @@ import '../platform_services.dart';
 import '../store.dart';
 import 'components.dart';
 import 'settings.dart';
+import 'widget_preferences.dart';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -88,12 +89,14 @@ class SettingsView extends StatefulWidget {
   final String layout;
   final ValueChanged<Appearance?> preview;
   final DesktopController? desktop;
+  final PlatformServices? services;
   const SettingsView({
     super.key,
     required this.store,
     required this.layout,
     required this.preview,
     this.desktop,
+    this.services,
   });
   @override
   State<SettingsView> createState() => _SettingsViewState();
@@ -106,6 +109,31 @@ class _SettingsViewState extends State<SettingsView> {
     'calendar': widget.store.document.calendar.clone(),
   };
   late final reminders = widget.store.document.reminders.clone();
+  late final widgetDraft = widget.store.widgetAppearance.clone();
+  bool widgetsDirty = false;
+  bool get android => widget.services?.isAndroid ?? Platform.isAndroid;
+  void changeWidget(VoidCallback fn) {
+    setState(fn);
+    widgetsDirty = true;
+  }
+
+  Future<void> addWidget(String kind) => run(() async {
+    await widget.store.dispatch({
+      'type': 'preferences',
+      'profiles': {},
+      'widgets': widgetDraft.toJson(),
+    });
+    await widget.services?.publish(
+      widget.store.document,
+      widgetAppearance: widget.store.widgetAppearance,
+    );
+    final accepted = await native.invokeMethod<bool>('widgetPin', kind);
+    if (accepted != true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('长按桌面 → 窗口小工具 → 泥土豆，选择日程或月历')),
+      );
+    }
+  });
   final dirtyProfiles = <String>{};
   bool remindersDirty = false, startupLoading = true;
   StartupSelection startup = const StartupSelection();
@@ -341,11 +369,12 @@ class _SettingsViewState extends State<SettingsView> {
           children: [
             CupertinoSlidingSegmentedControl<String>(
               groupValue: tab,
-              children: const {
-                'list': Text('清单'),
-                'calendar': Text('月历'),
-                'reminders': Text('日程'),
-                'account': Text('账号'),
+              children: {
+                'list': const Text('清单'),
+                'calendar': const Text('月历'),
+                'reminders': const Text('日程'),
+                if (android) 'widgets': const Text('组件'),
+                'account': const Text('账号'),
               },
               onValueChanged: (v) {
                 if (v == null) return;
@@ -892,11 +921,15 @@ class _SettingsViewState extends State<SettingsView> {
                     ],
                   ),
                 ),
-              if (Platform.isAndroid || Platform.isIOS)
+              if (android || Platform.isIOS)
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton(
                     onPressed: () => run(() async {
+                      if (android) {
+                        setState(() => tab = 'widgets');
+                        return;
+                      }
                       final ok = await native.invokeMethod<bool>('widgetPin');
                       if (ok != true && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -909,7 +942,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
             ],
             if (tab == 'reminders') ...[
-              if (Platform.isAndroid)
+              if (android)
                 section(
                   '系统提醒',
                   Column(
@@ -919,6 +952,10 @@ class _SettingsViewState extends State<SettingsView> {
                         onPressed: busy
                             ? null
                             : () => run(() async {
+                                if (widget.services != null) {
+                                  await widget.services!.permission();
+                                  return;
+                                }
                                 final android =
                                     FlutterLocalNotificationsPlugin()
                                         .resolvePlatformSpecificImplementation<
@@ -1045,6 +1082,13 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
               ),
             ],
+            if (tab == 'widgets')
+              WidgetPreferences(
+                appearance: widgetDraft,
+                busy: busy,
+                change: changeWidget,
+                add: (kind) => addWidget(kind),
+              ),
             if (tab == 'account' && Platform.isWindows)
               section(
                 '开机自启动',
@@ -1184,6 +1228,7 @@ class _SettingsViewState extends State<SettingsView> {
                                 key: drafts[key]!.toJson(),
                             },
                             if (remindersDirty) 'reminders': reminders.toJson(),
+                            if (widgetsDirty) 'widgets': widgetDraft.toJson(),
                           });
                           if (context.mounted) Navigator.pop(context);
                         }),
