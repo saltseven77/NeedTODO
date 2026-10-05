@@ -1,4 +1,5 @@
 api.whatineedtodotoday.xyz {
+    encode gzip
     header {
         Strict-Transport-Security "max-age=31536000"
         X-Content-Type-Options nosniff

@@ -79,7 +79,7 @@ class AppStore extends ChangeNotifier {
   final Uri? peer;
   final String peerToken;
   final String api;
-  final http.Client client = http.Client();
+  final http.Client client;
   Document document = Document();
   Map<String, dynamic> _deviceSettings = {}, _sharedStyles = {};
   String get _settingsKey => '$_key-device-settings';
@@ -197,7 +197,8 @@ class AppStore extends ChangeNotifier {
       defaultValue: 'https://api.whatineedtodotoday.xyz',
     ),
     this.vault = const FlutterSecureStorage(),
-  });
+    http.Client? httpClient,
+  }) : client = httpClient ?? http.Client();
   bool get entered => local || account != null;
   bool get githubBound => (account?['githubLogin'] as String? ?? '').isNotEmpty;
   bool get canCloudSync => account != null && githubBound;
@@ -432,19 +433,54 @@ class AppStore extends ChangeNotifier {
         !['127.0.0.1', 'localhost', '10.0.2.2'].contains(base.host)) {
       throw Exception('账号服务需要 HTTPS');
     }
-    final req =
-        http.Request(
-            method,
-            Uri.parse('${api.replaceFirst(RegExp(r'/$'), '')}$path'),
-          )
-          ..headers.addAll({
-            'content-type': 'application/json',
-            if (_token.isNotEmpty) 'authorization': 'Bearer $_token',
-          });
-    if (body != null) req.body = jsonEncode(body);
-    final response = await http.Response.fromStream(
-      await client.send(req).timeout(const Duration(seconds: 20)),
-    );
+    final uri = Uri.parse('${api.replaceFirst(RegExp(r'/$'), '')}$path');
+    final encoded = body == null ? null : jsonEncode(body);
+    final bearer = _token;
+    final retryable =
+        method == 'GET' || (method == 'PUT' && path == '/v2/sync');
+    http.Response? received;
+    for (var attempt = 0; attempt < (retryable ? 3 : 1); attempt++) {
+      final abort = Completer<void>();
+      final req = http.AbortableRequest(method, uri, abortTrigger: abort.future)
+        ..headers.addAll({
+          'content-type': 'application/json',
+          if (bearer.isNotEmpty) 'authorization': 'Bearer $bearer',
+        })
+        ..persistentConnection = attempt == 0;
+      if (encoded != null) req.body = encoded;
+      try {
+        // The deadline includes the entire response body, not just its headers.
+        received =
+            await (() async => http.Response.fromStream(
+              await client.send(req),
+            ))().timeout(
+              Duration(seconds: path == '/v2/sync' ? 45 : 20),
+              onTimeout: () {
+                if (!abort.isCompleted) abort.complete();
+                throw TimeoutException('Account response timed out');
+              },
+            );
+        if (retryable &&
+            [502, 503, 504].contains(received.statusCode) &&
+            attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 400 * (attempt + 1)),
+          );
+          continue;
+        }
+        break;
+      } on http.ClientException {
+        if (!retryable || attempt == 2) throw Exception('网络连接中断，请稍后重试；本机数据已保留');
+      } on SocketException {
+        if (!retryable || attempt == 2) {
+          throw Exception('无法连接账号服务，请检查网络；本机数据已保留');
+        }
+      } on TimeoutException {
+        if (!retryable || attempt == 2) throw Exception('同步连接超时，请稍后重试；本机数据已保留');
+      }
+      await Future<void>.delayed(Duration(milliseconds: 400 * (attempt + 1)));
+    }
+    final response = received!;
     final result = object(jsonDecode(response.body));
     if (response.statusCode == 409 && path == '/v2/sync') {
       return {...result, 'conflict': true};
@@ -524,6 +560,32 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
     try {
       var remote = await request('GET', '/v2/sync');
+      if (remote['document'] != null) {
+        final download = _writes.then((_) async {
+          if (account?['id'] != uid) return;
+          final next = mergeDocuments(
+            _canonical(document),
+            Document.fromJson(object(remote['document'])),
+          );
+          final previousRevision = revision;
+          revision = remote['revision'];
+          try {
+            await _persist(next, shared: true);
+          } catch (_) {
+            revision = previousRevision;
+            rethrow;
+          }
+          _acceptShared(next);
+          generation++;
+          if (error?.contains('连接') == true || error?.contains('同步') == true) {
+            error = null;
+          }
+          notifyListeners();
+          onDocumentChanged?.call();
+        });
+        _writes = download.catchError((Object _) {});
+        await download;
+      }
       for (var attempt = 0; attempt < 4; attempt++) {
         if (account?['id'] != uid) return;
         final sentGeneration = generation;
@@ -533,6 +595,17 @@ class AppStore extends ChangeNotifier {
                 _canonical(document),
                 Document.fromJson(object(remote['document'])),
               );
+        if (remote['document'] != null &&
+            jsonEncode(merged.toJson()) ==
+                jsonEncode(
+                  Document.fromJson(object(remote['document'])).toJson(),
+                )) {
+          revision = remote['revision'];
+          if (error?.contains('连接') == true || error?.contains('同步') == true) {
+            error = null;
+          }
+          return;
+        }
         final response = await request('PUT', '/v2/sync', {
           'revision': remote['revision'],
           'document': merged.toJson(),
