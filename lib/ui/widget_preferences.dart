@@ -147,6 +147,80 @@ class WidgetPreferences extends StatelessWidget {
         ),
       ],
     );
+    Widget colour(String label, Color value, ValueChanged<Color> update) =>
+        SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 13, color: ink),
+                ),
+              ),
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () async {
+                        final result = await showPanel<Color>(
+                          context,
+                          label,
+                          ColorEditor(initial: value, onPreview: update),
+                          width: 410,
+                        );
+                        update(result ?? value);
+                      },
+                child: Container(
+                  width: 25,
+                  height: 25,
+                  decoration: BoxDecoration(
+                    color: value,
+                    borderRadius: BorderRadius.circular(7),
+                    border: Border.all(
+                      color: const Color(0xffdedfe3),
+                      width: .7,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+    Widget adjustment(
+      String label,
+      double value,
+      double max,
+      String summary,
+      ValueChanged<double> update,
+    ) => SizedBox(
+      height: 52,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 76,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: ink),
+            ),
+          ),
+          Expanded(
+            child: Slider(
+              value: value,
+              max: max,
+              onChanged: busy ? null : update,
+            ),
+          ),
+          SizedBox(
+            width: 38,
+            child: Text(
+              summary,
+              textAlign: TextAlign.right,
+              style: const TextStyle(fontSize: 12, color: muted),
+            ),
+          ),
+        ],
+      ),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -158,77 +232,76 @@ class WidgetPreferences extends StatelessWidget {
             Expanded(child: card('calendar', '月历', '4×3')),
           ],
         ),
-        const SizedBox(height: 14),
-        const Text('外观', style: TextStyle(fontSize: 12, color: muted)),
-        Row(
-          children: [
-            const Expanded(child: Text('背景图片', style: TextStyle(fontSize: 12))),
-            TextButton(
-              onPressed: busy ? null : chooseBackground,
-              child: Text(background == null ? '选择图片' : '更换图片'),
-            ),
-            if (background != null)
-              TextButton(
-                onPressed: busy
-                    ? null
-                    : () => change(() => appearance.background = ''),
-                child: const Text('移除'),
-              ),
-          ],
+        const SizedBox(height: 20),
+        const Padding(
+          padding: EdgeInsets.only(left: 2, bottom: 10),
+          child: Text('外观', style: TextStyle(fontSize: 12, color: muted)),
         ),
-        if (background != null)
-          Row(
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xffe9eaed), width: .5),
+          ),
+          child: Column(
             children: [
-              const SizedBox(
-                width: 65,
-                child: Text('图片透明度', style: TextStyle(fontSize: 12)),
-              ),
-              Expanded(
-                child: Slider(
-                  value: appearance.imageOpacity,
-                  onChanged: busy
-                      ? null
-                      : (v) => change(() => appearance.imageOpacity = v),
+              SizedBox(
+                height: 44,
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '背景图片',
+                        style: TextStyle(fontSize: 13, color: ink),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: busy ? null : chooseBackground,
+                      child: Text(background == null ? '选择图片' : '更换图片'),
+                    ),
+                    if (background != null)
+                      IconButton(
+                        tooltip: '移除背景图片',
+                        onPressed: busy
+                            ? null
+                            : () => change(() => appearance.background = ''),
+                        icon: const Icon(CupertinoIcons.xmark, size: 15),
+                      ),
+                  ],
                 ),
+              ),
+              const Divider(height: 1, thickness: .5, color: Color(0xffeceef1)),
+              colour('底色', p.background, (v) => change(() => p.background = v)),
+              colour('文字', p.text, (v) => change(() => p.text = v)),
+              colour('强调色', p.accent, (v) => change(() => p.accent = v)),
+              const Divider(height: 1, thickness: .5, color: Color(0xffeceef1)),
+              if (background != null)
+                adjustment(
+                  '图片透明度',
+                  appearance.imageOpacity,
+                  1,
+                  '${(appearance.imageOpacity * 100).round()}%',
+                  (v) => change(() => appearance.imageOpacity = v),
+                ),
+              adjustment(
+                '透明度',
+                appearance.opacity,
+                1,
+                '${(appearance.opacity * 100).round()}%',
+                (v) => change(() => appearance.opacity = v),
+              ),
+              adjustment(
+                '圆角',
+                appearance.radius.clamp(0, 24),
+                24,
+                '${appearance.radius.round()}',
+                (v) => change(() => appearance.radius = v),
               ),
             ],
           ),
-        ColorField('底色', p.background, (v) => change(() => p.background = v)),
-        ColorField('文字', p.text, (v) => change(() => p.text = v)),
-        ColorField('强调色', p.accent, (v) => change(() => p.accent = v)),
-        Row(
-          children: [
-            const SizedBox(
-              width: 65,
-              child: Text('透明度', style: TextStyle(fontSize: 12)),
-            ),
-            Expanded(
-              child: Slider(
-                value: appearance.opacity,
-                onChanged: busy
-                    ? null
-                    : (v) => change(() => appearance.opacity = v),
-              ),
-            ),
-          ],
         ),
-        Row(
-          children: [
-            const SizedBox(
-              width: 65,
-              child: Text('圆角', style: TextStyle(fontSize: 12)),
-            ),
-            Expanded(
-              child: Slider(
-                value: appearance.radius.clamp(0, 24),
-                max: 24,
-                onChanged: busy
-                    ? null
-                    : (v) => change(() => appearance.radius = v),
-              ),
-            ),
-          ],
-        ),
+        const SizedBox(height: 18),
       ],
     );
   }
