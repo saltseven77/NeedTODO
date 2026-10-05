@@ -3,6 +3,13 @@
 #include <optional>
 #include <flutter/standard_method_codec.h>
 #include <dwmapi.h>
+#include <shellapi.h>
+#include <cwchar>
+#include "resource.h"
+
+namespace {
+constexpr UINT kTrayMessage = WM_APP + 41;
+}
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -38,8 +45,15 @@ bool FlutterWindow::OnCreate() {
       if (!enabled) { result->Error("argument", "Invalid desktop state"); return; }
       if (!SetDesktopEmbedded(*enabled)) { result->Error("desktop", "Windows 桌面暂不可用"); return; }
       result->Success();
+    } else if (call.method_name() == "trayEnable") {
+      const auto* enabled = call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
+      if (!enabled || !SetTrayEnabled(*enabled)) { result->Error("tray", "系统托盘暂不可用"); return; }
+      result->Success();
+    } else if (call.method_name() == "trayMenu") {
+      ShowTrayMenu(); result->Success();
     } else { result->NotImplemented(); }
   });
+  taskbar_created_ = RegisterWindowMessage(L"TaskbarCreated");
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -54,6 +68,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  SetTrayEnabled(false);
   SetDesktopEmbedded(false);
   platform_channel_.reset();
   if (flutter_controller_) {
@@ -61,6 +76,45 @@ void FlutterWindow::OnDestroy() {
   }
 
   Win32Window::OnDestroy();
+}
+
+bool FlutterWindow::SetTrayEnabled(bool enabled) {
+  NOTIFYICONDATA data{};
+  data.cbSize = static_cast<DWORD>(sizeof(data));
+  data.hWnd = GetHandle();
+  data.uID = 1;
+  data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+  data.uCallbackMessage = kTrayMessage;
+  data.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+  wcscpy_s(data.szTip, L"泥土豆 · NeedTODO");
+  if (!enabled) {
+    if (tray_enabled_) Shell_NotifyIcon(NIM_DELETE, &data);
+    tray_enabled_ = false;
+    return true;
+  }
+  if (tray_enabled_) return true;
+  tray_enabled_ = Shell_NotifyIcon(NIM_ADD, &data) != FALSE;
+  return tray_enabled_;
+}
+
+void FlutterWindow::ShowTrayMenu() {
+  if (!tray_enabled_ || !platform_channel_) return;
+  HMENU menu = CreatePopupMenu();
+  if (!menu) return;
+  AppendMenu(menu, MF_STRING, 1, L"打开清单");
+  AppendMenu(menu, MF_STRING, 2, L"桌面月历");
+  AppendMenu(menu, MF_STRING, 3, L"悬浮球");
+  AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenu(menu, MF_STRING, 4, L"退出软件");
+  POINT position{};
+  GetCursorPos(&position);
+  SetForegroundWindow(GetHandle());
+  const auto selected = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+      position.x, position.y, 0, GetHandle(), nullptr);
+  DestroyMenu(menu);
+  PostMessage(GetHandle(), WM_NULL, 0, 0);
+  if (selected) platform_channel_->InvokeMethod("trayAction",
+      std::make_unique<flutter::EncodableValue>(static_cast<int>(selected)));
 }
 
 bool FlutterWindow::SetDesktopEmbedded(bool enabled) {
@@ -121,6 +175,22 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == kRestoreMessage && platform_channel_) {
+    platform_channel_->InvokeMethod("trayAction", std::make_unique<flutter::EncodableValue>(1));
+    return 0;
+  }
+  if (taskbar_created_ && message == taskbar_created_ && tray_enabled_) {
+    tray_enabled_ = false;
+    SetTrayEnabled(true);
+    return 0;
+  }
+  if (message == kTrayMessage && platform_channel_) {
+    if (lparam == WM_RBUTTONUP) ShowTrayMenu();
+    else if (lparam == WM_LBUTTONUP || lparam == WM_LBUTTONDBLCLK) {
+      platform_channel_->InvokeMethod("trayAction", std::make_unique<flutter::EncodableValue>(1));
+    }
+    return 0;
+  }
   // Suggested DPI rectangles are screen coordinates. Applying them to an
   // Explorer child as parent-local coordinates makes the calendar jump/resize.
   if (message == WM_DPICHANGED && (embedding_transition_ || desktop_parent_)) return 0;

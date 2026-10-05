@@ -1,1 +1,1 @@
-{"name":"needtodo-account-service","version":"1.0.0","private":true,"type":"module","engines":{"node":">=22.16"},"scripts":{"start":"node --env-file-if-exists=.env index.mjs","backup":"node --env-file-if-exists=.env backup.mjs","test":"node --test test.mjs"}}
+{"name":"needtodo-account-service","version":"1.0.1","private":true,"type":"module","engines":{"node":">=22.16"},"scripts":{"start":"node --env-file-if-exists=.env index.mjs","backup":"node --env-file-if-exists=.env backup.mjs","test":"node --test test.mjs"}}

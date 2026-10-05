@@ -22,6 +22,7 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
     CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, uid TEXT NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS documents(uid TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, body TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS bindings(state TEXT PRIMARY KEY, uid TEXT NOT NULL REFERENCES users(id), ticket TEXT UNIQUE NOT NULL, expires INTEGER NOT NULL, status TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS recoveries(state TEXT PRIMARY KEY, ticket TEXT UNIQUE NOT NULL, uid TEXT REFERENCES users(id), expires INTEGER NOT NULL, status TEXT NOT NULL, verifier TEXT NOT NULL);
   `);
   if (!db.prepare('PRAGMA table_info(users)').all().some(column => column.name === 'password_params')) {
     db.exec('ALTER TABLE users ADD COLUMN password_params TEXT');
@@ -143,7 +144,10 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
       if (!u || !timingSafeEqual(derived, Buffer.from(u.password, 'hex'))) throw fail(401, '账号或密码错误');
       if (!u.password_params) {
         const salt = random(), upgraded = await passwordDigest(password, salt);
-        db.prepare('UPDATE users SET salt=?,password=?,password_params=? WHERE id=? AND password=?').run(salt, upgraded.toString('hex'), JSON.stringify(passwordSettings), u.id, u.password);
+        const changed = db.prepare('UPDATE users SET salt=?,password=?,password_params=? WHERE id=? AND password=?').run(salt, upgraded.toString('hex'), JSON.stringify(passwordSettings), u.id, u.password).changes;
+        if (!changed) throw fail(401, '账号或密码已更新，请重新登录');
+      } else if (db.prepare('SELECT password FROM users WHERE id=?').get(u.id)?.password !== u.password) {
+        throw fail(401, '账号或密码已更新，请重新登录');
       }
       return reply(200, session(u));
     }
@@ -151,6 +155,7 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
     if (url.pathname === '/v2/auth/logout' && req.method === 'POST') { user(req); db.prepare('DELETE FROM sessions WHERE token=?').run(hash(req.headers.authorization.slice(7))); return reply(200, { ok: true }); }
     if (url.pathname === '/v2/sync' && ['GET','PUT'].includes(req.method)) {
       const u = user(req); throttle(req, 'sync', 240);
+      if (!u.github_id) throw fail(403, '绑定 GitHub 后可开启云同步');
       if (req.method === 'GET') { const row = db.prepare('SELECT * FROM documents WHERE uid=?').get(u.id); return reply(200, { revision: row?.revision ?? 0, document: row ? JSON.parse(row.body) : null }); }
       const b = await body(req, 24 * 1024 * 1024); const doc = validateDocument(b.document);
       if (!Number.isSafeInteger(b.revision) || b.revision < 0) throw fail(400, '同步版本无效');
@@ -185,18 +190,53 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
         const revision = b.revision + 1; db.prepare('INSERT INTO documents VALUES(?,?,?) ON CONFLICT(uid) DO UPDATE SET revision=excluded.revision,body=excluded.body').run(u.id, revision, JSON.stringify(doc)); db.exec('COMMIT'); return reply(200, { revision, document: doc });
       } catch (e) { if (db.isTransaction) db.exec('ROLLBACK'); throw e; }
     }
-    if (url.pathname === '/v2/github/bind' && req.method === 'POST') {
-      const u = user(req); throttle(req, 'bind', 10);
-      if (u.github_id) throw fail(409, '此账号已绑定 GitHub');
+    if (['/v2/github/bind', '/v2/github/recover'].includes(url.pathname) && req.method === 'POST') {
+      const recovering = url.pathname.endsWith('/recover');
+      const u = recovering ? null : user(req); throttle(req, recovering ? 'recover' : 'bind', 10);
+      if (u?.github_id) throw fail(409, '此账号已绑定 GitHub');
       if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET || !process.env.PUBLIC_URL) throw fail(503, 'GitHub 绑定暂未开放');
       const state = random(), ticket = random(), verifier = random();
-      db.prepare('DELETE FROM bindings WHERE expires<?').run(Date.now());
-      db.prepare('INSERT INTO bindings(state,uid,ticket,expires,status,verifier) VALUES(?,?,?,?,?,?)').run(hash(state), u.id, hash(ticket), Date.now()+600000, 'pending', verifier);
+      const table = recovering ? 'recoveries' : 'bindings';
+      db.prepare(`DELETE FROM ${table} WHERE expires<?`).run(Date.now());
+      db.prepare(`INSERT INTO ${table}(state,uid,ticket,expires,status,verifier) VALUES(?,?,?,?,?,?)`).run(hash(state), u?.id ?? null, hash(ticket), Date.now()+600000, 'pending', verifier);
       const target = new URL('https://github.com/login/oauth/authorize'); target.searchParams.set('client_id', process.env.GITHUB_CLIENT_ID); target.searchParams.set('redirect_uri', `${process.env.PUBLIC_URL}/v2/github/callback`); target.searchParams.set('state', state); target.searchParams.set('scope', 'read:user');
       target.searchParams.set('code_challenge', createHash('sha256').update(verifier).digest('base64url'));
       target.searchParams.set('code_challenge_method','S256');
       target.searchParams.set('prompt','select_account');
       return reply(200, { url: target.toString(), ticket });
+    }
+    if (url.pathname === '/v2/github/recovery-status' && req.method === 'POST') {
+      throttle(req, 'recovery-poll', 180);
+      const b = await body(req);
+      if (typeof b.ticket !== 'string') throw fail(400, '授权无效');
+      const pending = db.prepare('SELECT * FROM recoveries WHERE ticket=? AND expires>?').get(hash(b.ticket), Date.now());
+      if (!pending) throw fail(410, '授权已过期');
+      const u = pending.status === 'complete' ? db.prepare('SELECT * FROM users WHERE id=?').get(pending.uid) : null;
+      return reply(200, {status: pending.status, ...(u ? {username: u.username} : {})});
+    }
+    if (url.pathname === '/v2/auth/reset' && req.method === 'POST') {
+      throttle(req, 'reset', 10);
+      const b = await body(req);
+      if (typeof b.ticket !== 'string') throw fail(400, '授权无效');
+      const pending = db.prepare('SELECT * FROM recoveries WHERE ticket=? AND expires>? AND status=?').get(hash(b.ticket), Date.now(), 'complete');
+      if (!pending) throw fail(410, '请重新通过 GitHub 验证身份');
+      const u = db.prepare('SELECT * FROM users WHERE id=?').get(pending.uid);
+      const {password} = credentials({username: u.username, password: b.password});
+      // Claim before hashing: a recovery ticket can reset a password only once.
+      db.prepare('UPDATE recoveries SET status=? WHERE state=?').run('resetting', pending.state);
+      try {
+        const salt = random(), derived = await passwordDigest(password, salt);
+        db.exec('BEGIN IMMEDIATE');
+        db.prepare('UPDATE users SET salt=?,password=?,password_params=? WHERE id=?').run(salt, derived.toString('hex'), JSON.stringify(passwordSettings), u.id);
+        db.prepare('DELETE FROM sessions WHERE uid=?').run(u.id);
+        db.prepare('UPDATE recoveries SET status=? WHERE uid=?').run('consumed', u.id);
+        db.exec('COMMIT');
+        return reply(200, {username: u.username});
+      } catch (e) {
+        if (db.isTransaction) db.exec('ROLLBACK');
+        db.prepare('UPDATE recoveries SET status=? WHERE state=? AND status=?').run('failed', pending.state, 'resetting');
+        throw e;
+      }
     }
     if (url.pathname === '/v2/github/status' && req.method === 'POST') {
       const u = user(req), b = await body(req); if (typeof b.ticket !== 'string') throw fail(400, '授权无效');
@@ -205,20 +245,34 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
     }
     if (url.pathname === '/v2/github/callback' && req.method === 'GET') {
       const key = hash(url.searchParams.get('state') ?? '');
-      const pending = db.prepare('SELECT * FROM bindings WHERE state=? AND expires>? AND status=?').get(key, Date.now(), 'pending');
+      let table = 'bindings';
+      let pending = db.prepare('SELECT * FROM bindings WHERE state=? AND expires>? AND status=?').get(key, Date.now(), 'pending');
+      if (!pending) {
+        table = 'recoveries';
+        pending = db.prepare('SELECT * FROM recoveries WHERE state=? AND expires>? AND status=?').get(key, Date.now(), 'pending');
+      }
       if (!pending) throw fail(400, '授权已过期');
       // Consume state before the first network await, preventing callback replay.
-      db.prepare('UPDATE bindings SET status=? WHERE state=?').run('processing', key);
+      db.prepare(`UPDATE ${table} SET status=? WHERE state=?`).run('processing', key);
       try {
         if (url.searchParams.has('error') || !url.searchParams.get('code')) throw fail(400, '已取消授权');
         const response = await githubFetch('https://github.com/login/oauth/access_token', { method:'POST', headers: { accept:'application/json', 'content-type':'application/json' }, body: JSON.stringify({client_id:process.env.GITHUB_CLIENT_ID,client_secret:process.env.GITHUB_CLIENT_SECRET,code:url.searchParams.get('code'),redirect_uri:`${process.env.PUBLIC_URL}/v2/github/callback`,...(pending.verifier?{code_verifier:pending.verifier}:{})}), signal:AbortSignal.timeout(15000) });
         const token = await response.json(); if (!response.ok || typeof token.access_token !== 'string') throw fail(502, 'GitHub 授权失败');
         const result = await githubFetch('https://api.github.com/user', {headers:{authorization:`Bearer ${token.access_token}`,accept:'application/vnd.github+json','user-agent':'NeedTODO'}, signal:AbortSignal.timeout(15000)});
         const profile = await result.json(); if (!result.ok || !Number.isSafeInteger(profile.id) || typeof profile.login !== 'string') throw fail(502, 'GitHub 账号无效');
-        try { db.prepare('UPDATE users SET github_id=?,github_login=? WHERE id=?').run(String(profile.id),profile.login,pending.uid); } catch { throw fail(409, '该 GitHub 已绑定其他账号'); }
-        db.prepare('UPDATE bindings SET status=? WHERE state=?').run('complete',key);
-        res.writeHead(200, {'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'"}); return res.end('<!doctype html><meta name="viewport" content="width=device-width"><title>泥土豆</title><style>body{font:16px system-ui;display:grid;place-content:center;height:80vh;background:#f7f7f9}</style><p>已绑定 GitHub，可返回泥土豆。</p>');
-      } catch(e) { db.prepare('UPDATE bindings SET status=? WHERE state=?').run('failed',key); throw e; }
+        if (table === 'recoveries') {
+          const u = db.prepare('SELECT id FROM users WHERE github_id=?').get(String(profile.id));
+          if (!u) throw fail(404, '此 GitHub 尚未绑定泥土豆账号');
+          db.prepare('UPDATE recoveries SET uid=?,status=? WHERE state=?').run(u.id, 'complete', key);
+        } else {
+          let changed;
+          try { changed = db.prepare('UPDATE users SET github_id=?,github_login=? WHERE id=? AND github_id IS NULL').run(String(profile.id),profile.login,pending.uid).changes; } catch { throw fail(409, '该 GitHub 已绑定其他账号'); }
+          if (!changed) throw fail(409, '此账号已绑定 GitHub');
+          db.prepare('UPDATE bindings SET status=? WHERE state=?').run('complete',key);
+        }
+        res.writeHead(200, {'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"});
+        return res.end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>泥土豆</title><style>body{font:15px system-ui;display:grid;place-content:center;height:80vh;background:#fff;color:#292c32}</style><p>${table === 'recoveries' ? '身份验证完成，请返回泥土豆设置新密码。' : '已绑定 GitHub，可返回泥土豆。'}</p>`);
+      } catch(e) { db.prepare(`UPDATE ${table} SET status=? WHERE state=?`).run('failed',key); throw e; }
     }
     throw fail(404, '接口不存在');
   }

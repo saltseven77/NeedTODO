@@ -1514,7 +1514,13 @@ class _JournalWorkspaceState extends State<JournalWorkspace>
                   },
                 ),
               ),
-            toolbar(),
+            if (widget.desktop == null && c.maxWidth < 600)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: toolbar(),
+              )
+            else
+              toolbar(),
             if (error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14),

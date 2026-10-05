@@ -31,8 +31,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     if (singleton && GetLastError() == ERROR_ALREADY_EXISTS) {
       EnumWindows([](HWND hwnd, LPARAM) -> BOOL {
         if (GetPropW(hwnd, L"NeedTODO.Primary")) {
-          ShowWindow(hwnd, SW_RESTORE);
-          SetForegroundWindow(hwnd);
+          PostMessage(hwnd, FlutterWindow::kRestoreMessage, 0, 0);
           return FALSE;
         }
         return TRUE;

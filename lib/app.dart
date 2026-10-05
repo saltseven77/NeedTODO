@@ -5,6 +5,7 @@ import 'package:app_links/app_links.dart';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -18,6 +19,7 @@ import 'holiday_calendar.dart';
 import 'ui/reminder_popup.dart';
 import 'ui/categories.dart';
 import 'ui/journal.dart';
+import 'ui/account_recovery.dart';
 
 class NeedTodoApp extends StatelessWidget {
   final AppStore store;
@@ -81,8 +83,30 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> useLocal() async {
+    final accepted = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (context) => CupertinoAlertDialog(
+        title: const Text('本机使用'),
+        content: const Text('数据仅保存在当前设备，无法跨设备同步。之后可登录账号并绑定 GitHub。'),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('继续使用'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true) await widget.store.enterLocal();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Colors.white,
     body: SafeArea(
       child: Column(
         children: [
@@ -225,11 +249,34 @@ class _LoginPageState extends State<LoginPage> {
                                 }),
                           child: Text(register ? '已有账号，登录' : '注册账号'),
                         ),
+                        if (!register)
+                          TextButton(
+                            onPressed: busy
+                                ? null
+                                : () => run(() async {
+                                    final recovered =
+                                        await Navigator.of(context)
+                                            .push<String>(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    AccountRecoveryPage(
+                                                      store: widget.store,
+                                                    ),
+                                              ),
+                                            );
+                                    if (recovered != null && mounted) {
+                                      username.text = recovered;
+                                      password.clear();
+                                    }
+                                  }),
+                            child: const Text(
+                              '通过 GitHub 找回账号',
+                              style: TextStyle(color: muted, fontSize: 12),
+                            ),
+                          ),
                         const SizedBox(height: 16),
                         TextButton(
-                          onPressed: busy
-                              ? null
-                              : () => run(widget.store.enterLocal),
+                          onPressed: busy ? null : () => run(useLocal),
                           child: const Text(
                             '本机使用',
                             style: TextStyle(color: muted),
@@ -298,6 +345,22 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     unawaited(holidayCalendar.loadAround(selected.year));
     store.addListener(changed);
     widget.services?.onReminder = showReminders;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.services?.onOpenTask = (id) {
+        final matches = store.document.tasks.where(
+          (task) => task.id == id && !task.deleted,
+        );
+        if (matches.isEmpty || !mounted) return;
+        final task = matches.first;
+        setState(() {
+          selected = DateTime.tryParse(task.date) ?? today;
+          scope = task.scope;
+          calendar = false;
+          journal = false;
+        });
+      };
+    });
     WidgetsBinding.instance.addObserver(this);
     todayTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       final now = dayOnly(DateTime.now());
@@ -364,13 +427,24 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     widget.services?.setForeground(state == AppLifecycleState.resumed);
     if (state == AppLifecycleState.resumed) {
-      run(store.sync);
+      run(() async {
+        await widget.services?.publish(store.document);
+      });
+      run(() async {
+        await store.refreshAccount();
+        await store.sync();
+      });
+    } else {
+      unawaited(
+        store.flushDrafts().catchError((Object e) => store.setError(e)),
+      );
     }
   }
 
   @override
   void dispose() {
     widget.services?.onReminder = null;
+    widget.services?.onOpenTask = null;
     holidayCalendar.removeListener(refresh);
     holidayCalendar.dispose();
     todayTimer?.cancel();
@@ -516,8 +590,37 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
         child: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           onTap: () => run(d!.expand),
-          child: Center(
-            child: Identity(data: store.document.list.floatingImage, size: 60),
+          onSecondaryTap: () => run(() => native.invokeMethod('trayMenu')),
+          onLongPress: () => run(() => native.invokeMethod('trayMenu')),
+          child: Stack(
+            children: [
+              Center(
+                child: Identity(
+                  data: store.document.list.floatingImage,
+                  size: 60,
+                ),
+              ),
+              Positioned(
+                top: 0,
+                right: 0,
+                child: SizedBox.square(
+                  dimension: 22,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: '隐藏悬浮球',
+                    onPressed: () => run(d!.hideToTray),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: .9),
+                    ),
+                    icon: const Icon(
+                      CupertinoIcons.xmark,
+                      size: 11,
+                      color: muted,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -629,6 +732,13 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                         CupertinoIcons.minus,
                         '收起',
                         () => run(calendar ? d.hideCalendar : d.collapse),
+                        color: p.text,
+                      ),
+                    if (d != null)
+                      ActionIcon(
+                        CupertinoIcons.xmark,
+                        '关闭窗口',
+                        d.onWindowClose,
                         color: p.text,
                       ),
                   ],
@@ -1020,6 +1130,28 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     );
     if (d != null && !d.locked) {
       body = DragToResizeArea(resizeEdgeSize: 6, child: body);
+    }
+    if (d == null) {
+      body = PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
+          run(() async {
+            await store.flushDrafts();
+            if (!mounted) return;
+            if (journal || calendar) {
+              setState(() {
+                journal = false;
+                calendar = false;
+              });
+            } else {
+              await store.storage.flush();
+              await SystemNavigator.pop();
+            }
+          });
+        },
+        child: body,
+      );
     }
     return body;
   }

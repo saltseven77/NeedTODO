@@ -31,7 +31,7 @@ jobs:
         with:
           flutter-version: '3.47.5'
           cache: true
-      - run: flutter build windows --release --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL }}
+      - run: flutter build windows --release --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL || 'https://api.whatineedtodotoday.xyz' }}
       - shell: pwsh
         run: |
           $release = 'build/windows/x64/runner/Release'
@@ -62,11 +62,35 @@ jobs:
         with:
           flutter-version: '3.47.5'
           cache: true
-      - run: flutter build apk --debug --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL }}
+      - name: Configure release signing
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import os, base64
+          from pathlib import Path
+          encoded = os.environ.get('ANDROID_KEYSTORE_BASE64')
+          if encoded:
+              key = Path(os.environ['RUNNER_TEMP']) / 'needtodo-release.jks'
+              key.write_bytes(base64.b64decode(encoded))
+              key.chmod(0o600)
+              values = {'storeFile': str(key), 'storePassword': os.environ['ANDROID_KEYSTORE_PASSWORD'], 'keyAlias': os.environ['ANDROID_KEY_ALIAS'], 'keyPassword': os.environ['ANDROID_KEY_PASSWORD']}
+              properties = Path('android/key.properties')
+              properties.write_text(''.join(f'{k}={v}\n' for k, v in values.items()))
+              properties.chmod(0o600)
+          PY
+      - name: Build Android
+        run: |
+          if [ -f android/key.properties ]; then mode=release; else mode=debug; fi
+          flutter build apk --$mode --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL || 'https://api.whatineedtodotoday.xyz' }}
       - uses: actions/upload-artifact@v4
         with:
-          name: NeedTODO-Android-Test
-          path: build/app/outputs/flutter-apk/app-debug.apk
+          name: NeedTODO-Android
+          path: build/app/outputs/flutter-apk/*.apk
   ios:
     needs: checks
     runs-on: macos-latest
@@ -76,7 +100,7 @@ jobs:
         with:
           flutter-version: '3.47.5'
           cache: true
-      - run: flutter build ios --release --no-codesign --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL }}
+      - run: flutter build ios --release --no-codesign --dart-define=NEEDTODO_API_URL=${{ vars.NEEDTODO_API_URL || 'https://api.whatineedtodotoday.xyz' }}
       - uses: actions/upload-artifact@v4
         with:
           name: NeedTODO-iOS-Unsigned

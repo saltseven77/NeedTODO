@@ -2,12 +2,15 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../model.dart';
 import '../platform_services.dart';
 import '../store.dart';
 import 'components.dart';
 import 'settings.dart';
+
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 /// Fixed neutral appearance, independent of the workspace's user palette.
 ThemeData preferencesTheme(BuildContext context) {
@@ -906,6 +909,45 @@ class _SettingsViewState extends State<SettingsView> {
                 ),
             ],
             if (tab == 'reminders') ...[
+              if (Platform.isAndroid)
+                section(
+                  '系统提醒',
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                final android =
+                                    FlutterLocalNotificationsPlugin()
+                                        .resolvePlatformSpecificImplementation<
+                                          AndroidFlutterLocalNotificationsPlugin
+                                        >();
+                                await android?.requestNotificationsPermission();
+                                if (await android
+                                        ?.canScheduleExactNotifications() !=
+                                    true) {
+                                  await android?.requestExactAlarmsPermission();
+                                }
+                              }),
+                        child: const Text('开启日程提醒'),
+                      ),
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await FlutterLocalNotificationsPlugin()
+                                    .resolvePlatformSpecificImplementation<
+                                      AndroidFlutterLocalNotificationsPlugin
+                                    >()
+                                    ?.openAppNotificationSettings();
+                              }),
+                        child: const Text('通知与顶部横幅设置'),
+                      ),
+                    ],
+                  ),
+                ),
               section(
                 '日程视图',
                 toggle(
@@ -1040,34 +1082,66 @@ class _SettingsViewState extends State<SettingsView> {
             if (tab == 'account' && widget.store.peer == null)
               section(
                 '账号',
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: Text(
-                        widget.store.account?['username'] ?? '本机使用',
-                        style: const TextStyle(fontSize: 12),
-                      ),
+                    Text(
+                      widget.store.account?['username'] ?? '本机使用',
+                      style: const TextStyle(fontSize: 12),
                     ),
                     if (widget.store.account != null) ...[
-                      TextButton(
-                        onPressed: busy ? null : () => run(widget.store.sync),
-                        child: const Text('同步'),
-                      ),
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => run(widget.store.bindGithub),
-                        child: const Text('GitHub'),
+                      const SizedBox(height: 8),
+                      if (widget.store.githubBound)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            'GitHub · 已绑定 @${widget.store.account!['githubLogin']}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xff6e747c),
+                            ),
+                          ),
+                        )
+                      else
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: busy || widget.store.githubBound
+                                ? null
+                                : () => run(widget.store.bindGithub),
+                            child: Text(
+                              widget.store.githubBound
+                                  ? 'GitHub · 已绑定 @${widget.store.account!['githubLogin']}'
+                                  : '绑定 GitHub',
+                            ),
+                          ),
+                        ),
+                      if (!widget.store.githubBound)
+                        const Text(
+                          '绑定后可找回账号、跨设备同步。',
+                          style: TextStyle(fontSize: 11, color: muted),
+                        ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        '数据仅保存在当前设备，无法跨设备同步。',
+                        style: TextStyle(fontSize: 11, color: muted),
                       ),
                     ],
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => run(() async {
-                              await widget.store.logout();
-                              if (context.mounted) Navigator.pop(context);
-                            }),
-                      child: Text(widget.store.local ? '登录' : '退出'),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await widget.store.logout();
+                                if (context.mounted) Navigator.pop(context);
+                              }),
+                        child: Text(widget.store.local ? '返回登录页' : '退出账号'),
+                      ),
                     ),
                   ],
                 ),
@@ -1076,6 +1150,24 @@ class _SettingsViewState extends State<SettingsView> {
               Text(
                 error!,
                 style: const TextStyle(fontSize: 11, color: Colors.redAccent),
+              ),
+            if (widget.store.peer == null && !Platform.isIOS)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => run(() async {
+                          if (widget.desktop != null) {
+                            await widget.desktop!.quit();
+                          } else {
+                            await widget.store.flushDrafts();
+                            await widget.store.storage.flush();
+                            await SystemNavigator.pop();
+                          }
+                        }),
+                  child: const Text('退出软件', style: TextStyle(color: muted)),
+                ),
               ),
             Row(
               children: [

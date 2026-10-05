@@ -26,6 +26,9 @@ void main() {
       await tester.ensureVisible(find.text('本机使用'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('本机使用'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('无法跨设备同步'), findsOneWidget);
+      await tester.tap(find.text('继续使用'));
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 80)),
       );

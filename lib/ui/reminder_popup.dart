@@ -15,6 +15,15 @@ import 'components.dart';
 const reminderLifetime = Duration(seconds: 20);
 double reminderHeight(int count) => 96 + (count - 1).clamp(0, 2) * 34.0;
 const _reminderReady = 'NEEDTODO_REMINDER_READY';
+final _desktopReminders = <Process>{};
+bool _remindersClosing = false;
+void closeDesktopReminders() {
+  _remindersClosing = true;
+  for (final process in _desktopReminders.toList()) {
+    process.kill();
+  }
+  _desktopReminders.clear();
+}
 
 void preventReminderActivation(int handle) {
   final user32 = DynamicLibrary.open('user32.dll');
@@ -39,6 +48,7 @@ Future<void> showDesktopReminder(
   List<Todo> tasks,
   ReminderStyle style,
 ) async {
+  if (_remindersClosing) return;
   final folder = Directory('${data.path}/reminder-popups');
   await folder.create(recursive: true);
   final file = File('${folder.path}/reminder-${newId()}.json');
@@ -49,12 +59,15 @@ Future<void> showDesktopReminder(
     }),
     flush: true,
   );
+  Process? child;
   try {
-    final process = await Process.start(Platform.resolvedExecutable, [
+    final process = child = await Process.start(Platform.resolvedExecutable, [
       '--calendar',
       '--reminder',
       file.absolute.path,
     ], workingDirectory: File(Platform.resolvedExecutable).parent.path);
+    _desktopReminders.add(process);
+    if (_remindersClosing) process.kill();
     await process.stdin.close();
     final ready = process.stdout
         .transform(utf8.decoder)
@@ -77,7 +90,7 @@ Future<void> showDesktopReminder(
     final code = await process.exitCode,
         shown = await ready,
         error = await diagnostic;
-    if (code != 0 && !shown) {
+    if (code != 0 && !shown && !_remindersClosing) {
       throw StateError('提醒窗口未能打开（退出码 $code）${error.isEmpty ? '' : '：$error'}');
     }
     if (code != 0) {
@@ -89,6 +102,7 @@ Future<void> showDesktopReminder(
       } catch (_) {}
     }
   } finally {
+    if (child != null) _desktopReminders.remove(child);
     if (await file.exists()) await file.delete();
   }
 }

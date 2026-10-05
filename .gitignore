@@ -54,4 +54,8 @@ server/backups/
 *.sqlite*
 .cache/
 android/.kotlin/
+android/build/
+android/key.properties
+*.jks
+*.keystore
 release/

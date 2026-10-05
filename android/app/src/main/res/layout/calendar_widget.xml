@@ -1,9 +1,13 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
   <ImageView android:id="@+id/widget_surface" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:contentDescription="" />
   <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="14dp">
-  <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="32dp" android:textSize="15sp" android:textStyle="bold" android:gravity="center_vertical" android:maxLines="1" />
+  <LinearLayout android:layout_width="match_parent" android:layout_height="36dp" android:orientation="horizontal">
+    <TextView android:id="@+id/widget_title" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:textSize="15sp" android:gravity="center_vertical" android:maxLines="1" android:ellipsize="end" android:contentDescription="回到本月" />
+    <TextView android:id="@+id/widget_previous" android:layout_width="32dp" android:layout_height="match_parent" android:gravity="center" android:text="‹" android:textSize="24sp" android:contentDescription="上个月" />
+    <TextView android:id="@+id/widget_next" android:layout_width="32dp" android:layout_height="match_parent" android:gravity="center" android:text="›" android:textSize="24sp" android:contentDescription="下个月" />
+  </LinearLayout>
   <LinearLayout android:id="@+id/widget_weekdays" android:layout_width="match_parent" android:layout_height="22dp" android:orientation="vertical" />
-  <LinearLayout android:id="@+id/widget_grid" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+  <LinearLayout android:id="@+id/widget_grid" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />
   <TextView android:id="@+id/widget_agenda" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:textSize="12sp" android:maxLines="3" android:ellipsize="end" />
 </LinearLayout>
 </FrameLayout>

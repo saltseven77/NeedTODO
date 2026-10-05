@@ -134,6 +134,8 @@ class AppStore extends ChangeNotifier {
     this.vault = const FlutterSecureStorage(),
   });
   bool get entered => local || account != null;
+  bool get githubBound => (account?['githubLogin'] as String? ?? '').isNotEmpty;
+  bool get canCloudSync => account != null && githubBound;
   String get _key => account == null
       ? 'local'
       : 'user-${base64UrlEncode(utf8.encode(account!['id'])).replaceAll('=', '')}';
@@ -169,11 +171,18 @@ class AppStore extends ChangeNotifier {
       }
       ready = true;
       _timer = Timer.periodic(const Duration(seconds: 45), (_) {
-        if (account != null) sync().catchError((Object e) => setError(e));
+        if (canCloudSync) sync().catchError((Object e) => setError(e));
       });
     }
     notifyListeners();
     onDocumentChanged?.call();
+    if (account != null && peer == null) {
+      unawaited(
+        refreshAccount()
+            .then((_) => sync())
+            .catchError((Object e) => setError(e)),
+      );
+    }
   }
 
   void setError(Object e) {
@@ -357,6 +366,7 @@ class AppStore extends ChangeNotifier {
     String password,
     bool register,
   ) async {
+    await flushDrafts();
     final result = await request(
       'POST',
       register ? '/v2/auth/register' : '/v2/auth/login',
@@ -411,7 +421,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> sync() async {
-    if (account == null || syncing || peer != null) return;
+    if (!canCloudSync || syncing || peer != null) return;
     final uid = account!['id'];
     syncing = true;
     notifyListeners();
@@ -464,6 +474,16 @@ class AppStore extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshAccount() async {
+    if (account == null || peer != null) return;
+    final uid = account!['id'];
+    final result = await request('GET', '/v2/account');
+    if (account?['id'] != uid) return;
+    account = object(result['account']);
+    await storage.write('session', {'local': false, 'account': account});
+    notifyListeners();
+  }
+
   Future<void> bindGithub() async {
     if (account == null) return;
     final r = await request('POST', '/v2/github/bind');
@@ -487,10 +507,33 @@ class AppStore extends ChangeNotifier {
         await storage.write('session', {'local': false, 'account': account});
         bindingTicket = null;
         notifyListeners();
+        await sync();
         return;
       }
     }
     throw Exception('授权已超时');
+  }
+
+  Future<Map<String, dynamic>> startRecovery() async {
+    final result = await request('POST', '/v2/github/recover');
+    if (!await launchUrl(
+      Uri.parse(result['url']),
+      mode: LaunchMode.externalApplication,
+    )) {
+      throw Exception('无法打开浏览器');
+    }
+    return result;
+  }
+
+  Future<Map<String, dynamic>> recoveryStatus(String ticket) =>
+      request('POST', '/v2/github/recovery-status', {'ticket': ticket});
+
+  Future<String> resetPassword(String ticket, String password) async {
+    final result = await request('POST', '/v2/auth/reset', {
+      'ticket': ticket,
+      'password': password,
+    });
+    return result['username'] as String;
   }
 
   Future<void> openCalendar() async {

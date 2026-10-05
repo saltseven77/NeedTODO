@@ -16,13 +16,16 @@ import 'model.dart';
 import 'storage.dart';
 
 const native = MethodChannel('com.needtodo/platform');
+const reminderTestId = 2147483000;
 
 class PlatformServices {
   final FlutterLocalNotificationsPlugin notifications;
   PlatformServices({
     FlutterLocalNotificationsPlugin? notifications,
     Directory? dataDirectory,
+    bool? android,
   }) : notifications = notifications ?? FlutterLocalNotificationsPlugin(),
+       isAndroid = android ?? Platform.isAndroid,
        _deliveryStorage = dataDirectory == null
            ? null
            : JsonStorage(dataDirectory),
@@ -30,6 +33,27 @@ class PlatformServices {
            ? null
            : Directory('${dataDirectory.path}/reminders');
   final Map<int, List<Object?>> _scheduled = {};
+  final bool isAndroid;
+  String? _pendingOpenTask;
+  void Function(String)? _onOpenTask;
+  set onOpenTask(void Function(String)? handler) {
+    _onOpenTask = handler;
+    if (handler != null && _pendingOpenTask != null) {
+      final id = _pendingOpenTask!;
+      _pendingOpenTask = null;
+      handler(id);
+    }
+  }
+
+  void _openTask(String? id) {
+    if (id == null || id.isEmpty) return;
+    if (_onOpenTask != null) {
+      _onOpenTask!(id);
+    } else {
+      _pendingOpenTask = id;
+    }
+  }
+
   final Map<String, String> _mediaSources = {};
   Directory? _mediaDirectory;
   final JsonStorage? _deliveryStorage;
@@ -138,16 +162,46 @@ class PlatformServices {
 
   Future<void> testReminder([ReminderStyle? preview]) async {
     if (_onReminder == null) throw StateError('请先打开清单');
+    final style =
+        preview?.clone() ?? _latest?.reminders.clone() ?? ReminderStyle();
+    if (isAndroid && initialized) {
+      await permission();
+      final exact =
+          await notifications
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >()
+              ?.canScheduleExactNotifications() ==
+          true;
+      await notifications.cancel(id: reminderTestId);
+      await notifications.zonedSchedule(
+        id: reminderTestId,
+        title: '日程提醒',
+        body: '这是一条测试提醒',
+        scheduledDate: tz.TZDateTime.from(
+          DateTime.now().add(const Duration(seconds: 3)).toUtc(),
+          tz.UTC,
+        ),
+        notificationDetails: await _details(style),
+        androidScheduleMode: exact
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    }
     _testTimer?.cancel();
     _testTimer = Timer(const Duration(seconds: 3), () async {
       try {
+        if (isAndroid && !_foreground) return;
+        if (isAndroid && initialized) {
+          await notifications.cancel(id: reminderTestId);
+        }
         await _onReminder?.call([
           Todo(
             title: '这是一条测试提醒',
             date: dayKey(DateTime.now()),
             reminder: DateTime.now(),
           ),
-        ], preview?.clone() ?? _latest?.reminders.clone() ?? ReminderStyle());
+        ], style);
       } catch (e) {
         onError?.call(e);
       }
@@ -158,6 +212,7 @@ class PlatformServices {
     _dueTimer?.cancel();
     _testTimer?.cancel();
     _onReminder = null;
+    _onOpenTask = null;
   }
 
   bool initialized = false;
@@ -179,18 +234,29 @@ class PlatformServices {
           guid: 'aaef01d2-1323-4c97-95cc-bb521c531ff0',
         ),
       ),
+      onDidReceiveNotificationResponse: (response) =>
+          _openTask(response.payload),
     );
     if (ready != true) throw StateError('系统通知初始化失败');
     initialized = true;
+    if (isAndroid || Platform.isIOS) {
+      final launch = await notifications.getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true) {
+        _openTask(launch?.notificationResponse?.payload);
+      }
+    }
   }
 
   Future<void> permission() async {
-    if (Platform.isAndroid) {
-      await notifications
+    if (isAndroid) {
+      final android = notifications
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
-          >()
-          ?.requestNotificationsPermission();
+          >();
+      await android?.requestNotificationsPermission();
+      if (await android?.canScheduleExactNotifications() != true) {
+        await android?.requestExactAlarmsPermission();
+      }
     }
     if (Platform.isIOS) {
       await notifications
@@ -245,10 +311,15 @@ class PlatformServices {
         ],
       ),
       android: AndroidNotificationDetails(
-        'schedules',
-        '日程',
-        importance: Importance.high,
+        'needtodo_schedule_alerts_v2',
+        '日程提醒',
+        channelDescription: '即将开始的日程，声音与顶部横幅提醒',
+        importance: Importance.max,
         priority: Priority.high,
+        category: AndroidNotificationCategory.reminder,
+        playSound: true,
+        enableVibration: true,
+        visibility: NotificationVisibility.private,
         largeIcon: avatar == null ? null : FilePathAndroidBitmap(avatar.path),
         styleInformation: background == null
             ? null
@@ -269,10 +340,23 @@ class PlatformServices {
     _latest = snapshot;
     _arm();
     final op = _queue.then((_) async {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (isAndroid || Platform.isIOS) {
         await native.invokeMethod(
           'widgetUpdate',
-          jsonEncode(snapshot.toJson()),
+          jsonEncode({
+            'calendar': snapshot.calendar.toJson(),
+            'tasks': snapshot.tasks
+                .where((t) => !t.deleted && !t.done && t.scope == 'day')
+                .map(
+                  (t) => {
+                    'id': t.id,
+                    'title': t.title,
+                    'date': t.date,
+                    'scope': t.scope,
+                  },
+                )
+                .toList(),
+          }),
         );
       }
       if (!initialized) throw StateError('系统通知未初始化');
@@ -288,7 +372,7 @@ class PlatformServices {
               .toList()
             ..sort((a, b) => a.reminder!.compareTo(b.reminder!));
       // IDs are deterministic across process restarts, and collision-resolved.
-      final ids = <int>{};
+      final ids = <int>{reminderTestId};
       final schedules = <int, Todo>{};
       for (final t in future.take(60)) {
         var id = t.id.codeUnits.fold(
@@ -305,10 +389,24 @@ class PlatformServices {
       final pending = await notifications.pendingNotificationRequests();
       final pendingIds = pending.map((p) => p.id).toSet();
       for (final p in pending) {
-        if (!ids.contains(p.id)) await notifications.cancel(id: p.id);
+        if (!ids.contains(p.id) ||
+            (p.id == reminderTestId && _testTimer?.isActive != true)) {
+          await notifications.cancel(id: p.id);
+        }
       }
       _scheduled.removeWhere((id, _) => !ids.contains(id));
       NotificationDetails? details;
+      final exact =
+          isAndroid &&
+          await notifications
+                  .resolvePlatformSpecificImplementation<
+                    AndroidFlutterLocalNotificationsPlugin
+                  >()
+                  ?.canScheduleExactNotifications() ==
+              true;
+      final mode = exact
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle;
       for (final entry in schedules.entries) {
         final t = entry.value;
         final appearance = snapshot.reminders;
@@ -318,6 +416,7 @@ class PlatformServices {
           appearance.message,
           appearance.avatar,
           appearance.background,
+          mode,
         ];
         if (listEquals(_scheduled[entry.key], signature) &&
             pendingIds.contains(entry.key)) {
@@ -325,7 +424,9 @@ class PlatformServices {
         }
         details ??= await _details(appearance);
         // Media preparation can take time; never send a date that has just elapsed.
-        final delivery = t.reminder!.add(const Duration(seconds: 5));
+        final delivery = isAndroid
+            ? t.reminder!
+            : t.reminder!.add(const Duration(seconds: 5));
         if (!delivery.isAfter(DateTime.now())) continue;
         // Windows AddToSchedule appends even when the tag is unchanged.
         for (final previous in pending.where((p) => p.id == entry.key)) {
@@ -339,7 +440,7 @@ class PlatformServices {
               : '${appearance.message.trim()}\n${t.title}',
           scheduledDate: tz.TZDateTime.from(delivery.toUtc(), tz.UTC),
           notificationDetails: details,
-          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          androidScheduleMode: mode,
           payload: t.id,
         );
         _scheduled[entry.key] = signature;
@@ -376,6 +477,8 @@ class DesktopController extends ChangeNotifier with WindowListener {
   String? docked;
   Timer? _saveTimer, _edgeTimer;
   Future<void> Function()? onClose;
+  Future<void> Function()? onOpenCalendar;
+  bool trayReady = false, _quitting = false;
   void Function(Object)? onError;
   DesktopController(this.storage, {required this.calendar});
   String get key => calendar ? 'window-calendar' : 'window-list';
@@ -508,9 +611,11 @@ class DesktopController extends ChangeNotifier with WindowListener {
       if (calendar) {
         await hideCalendar();
       } else {
-        await saveNow();
-        await onClose?.call();
-        await windowManager.destroy();
+        if (trayReady) {
+          await hideToTray();
+        } else {
+          await quit();
+        }
       }
     });
   }
@@ -780,6 +885,51 @@ class DesktopController extends ChangeNotifier with WindowListener {
     _saveTimer?.cancel();
     windowManager.removeListener(this);
     await persist();
+  }
+
+  Future<void> initializeTray() async {
+    if (calendar) return;
+    native.setMethodCallHandler((call) async {
+      if (call.method != 'trayAction') return;
+      guard(() async {
+        switch (call.arguments) {
+          case 1:
+            await expand();
+          case 2:
+            await onOpenCalendar?.call();
+          case 3:
+            await windowManager.show();
+            if (!collapsed) await collapse();
+          case 4:
+            await quit();
+        }
+      });
+    });
+    await native.invokeMethod('trayEnable', true);
+    trayReady = true;
+  }
+
+  Future<void> hideToTray() async {
+    await saveNow();
+    await windowManager.hide();
+  }
+
+  Future<void> quit() async {
+    if (_quitting) return;
+    _quitting = true;
+    try {
+      await saveNow();
+      await onClose?.call();
+      if (trayReady) {
+        await native.invokeMethod('trayEnable', false);
+        trayReady = false;
+        native.setMethodCallHandler(null);
+      }
+      await windowManager.destroy();
+    } catch (_) {
+      _quitting = false;
+      rethrow;
+    }
   }
 }
 

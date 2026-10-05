@@ -13,6 +13,7 @@
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
  public:
+  static constexpr UINT kRestoreMessage = WM_APP + 42;
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
   explicit FlutterWindow(const flutter::DartProject& project);
   virtual ~FlutterWindow();
@@ -37,6 +38,10 @@ class FlutterWindow : public Win32Window {
   RECT desktop_bounds_{};
   bool embedding_transition_ = false;
   bool SetDesktopEmbedded(bool enabled);
+  bool tray_enabled_ = false;
+  UINT taskbar_created_ = 0;
+  bool SetTrayEnabled(bool enabled);
+  void ShowTrayMenu();
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

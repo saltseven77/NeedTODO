@@ -82,9 +82,24 @@ Future<void> main(List<String> args) async {
       desktop.onError = store.setError;
       desktop.onClose = () async {
         await store.shutdown();
+        closeDesktopReminders();
         services?.dispose();
         await desktop!.close();
       };
+      if (!secondary) {
+        desktop.onOpenCalendar = () async {
+          if (store.entered) {
+            await store.openCalendar();
+          } else {
+            await desktop!.expand();
+          }
+        };
+        try {
+          await desktop.initializeTray();
+        } catch (e, stack) {
+          unawaited(log(e, stack));
+        }
+      }
     }
     if (!secondary) {
       services = PlatformServices(dataDirectory: directory);
@@ -96,10 +111,12 @@ Future<void> main(List<String> args) async {
       }
     }
     store.onDocumentChanged = () {
-      services?.publish(store.document).catchError((Object e) {
-        unawaited(log(e, null));
-        store.setError('系统通知更新失败；程序运行时仍会弹出提醒');
-      });
+      services?.publish(store.entered ? store.document : Document()).catchError(
+        (Object e) {
+          unawaited(log(e, null));
+          store.setError('系统通知更新失败；程序运行时仍会弹出提醒');
+        },
+      );
     };
     services?.onError = (e) {
       unawaited(log(e, null));
@@ -130,7 +147,6 @@ Future<void> main(List<String> args) async {
       }
     }
     await store.load();
-    if (portable && !secondary && !store.entered) await store.enterLocal();
     if (calendarOnly && !store.entered) await desktop?.expand();
     runApp(NeedTodoApp(store: store, desktop: desktop, services: services));
     if (startup?.calendar == true) {
