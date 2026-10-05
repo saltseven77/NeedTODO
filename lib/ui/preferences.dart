@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../model.dart';
 import '../platform_services.dart';
@@ -1088,6 +1087,12 @@ class _SettingsViewState extends State<SettingsView> {
                 busy: busy,
                 change: changeWidget,
                 add: (kind) => addWidget(kind),
+                chooseBackground: () => run(() async {
+                  final image = await pickImage(context);
+                  if (image != null) {
+                    changeWidget(() => widgetDraft.background = image);
+                  }
+                }),
               ),
             if (tab == 'account' && Platform.isWindows)
               section(
@@ -1194,24 +1199,6 @@ class _SettingsViewState extends State<SettingsView> {
               Text(
                 error!,
                 style: const TextStyle(fontSize: 11, color: Colors.redAccent),
-              ),
-            if (widget.store.peer == null && !Platform.isIOS)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: busy
-                      ? null
-                      : () => run(() async {
-                          if (widget.desktop != null) {
-                            await widget.desktop!.quit();
-                          } else {
-                            await widget.store.flushDrafts();
-                            await widget.store.storage.flush();
-                            await SystemNavigator.pop();
-                          }
-                        }),
-                  child: const Text('退出软件', style: TextStyle(color: muted)),
-                ),
               ),
             Row(
               children: [

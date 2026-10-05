@@ -206,12 +206,14 @@ class _CategoryNameState extends State<_CategoryName> {
 }
 
 class MonthOverview extends StatelessWidget {
+  final bool showCounts;
   final List<Todo> tasks;
   final Appearance appearance;
   final DateTime month, today;
   final ValueChanged<Todo> edit, toggle;
   const MonthOverview({
     super.key,
+    this.showCounts = true,
     required this.tasks,
     required this.appearance,
     required this.month,
@@ -265,6 +267,7 @@ class MonthOverview extends StatelessWidget {
           ),
         for (final name in names)
           _CategoryProgress(
+            showCounts: showCounts,
             key: ValueKey('category-$name'),
             name: name,
             tasks: groups[name]!,
@@ -278,12 +281,14 @@ class MonthOverview extends StatelessWidget {
 }
 
 class _CategoryProgress extends StatefulWidget {
+  final bool showCounts;
   final String name;
   final List<Todo> tasks;
   final Appearance appearance;
   final ValueChanged<Todo> edit, toggle;
   const _CategoryProgress({
     super.key,
+    required this.showCounts,
     required this.name,
     required this.tasks,
     required this.appearance,
@@ -355,17 +360,18 @@ class _CategoryProgressState extends State<_CategoryProgress> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    SizedBox(
-                      width: 38,
-                      child: Text(
-                        '$done / ${widget.tasks.length}',
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: p.text.withValues(alpha: .6),
+                    if (widget.showCounts)
+                      SizedBox(
+                        width: 38,
+                        child: Text(
+                          '$done / ${widget.tasks.length}',
+                          textAlign: TextAlign.right,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: p.text.withValues(alpha: .6),
+                          ),
                         ),
                       ),
-                    ),
                     const SizedBox(width: 10),
                     AnimatedRotation(
                       turns: expanded ? .5 : 0,

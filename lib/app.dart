@@ -417,7 +417,9 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     if (date == null || !mounted) return;
     setState(() {
       selected = date;
-      calendar = true;
+      calendar = value['view'] != 'agenda';
+      showAgenda = calendar;
+      scope = 'day';
       journal = false;
     });
     if (value['add'] == true) {
@@ -762,6 +764,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                     final wide = c.maxWidth >= 760 && c.maxHeight >= 430;
                     return calendar
                         ? CalendarWorkspace(
+                            showCounts: d != null,
                             appearance: a,
                             calendarDays: holidayCalendar.days,
                             selected: selected,
@@ -981,6 +984,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                     ),
                                   if (scope == 'week')
                                     TaskProgress(
+                                      showCounts: d != null,
                                       tasks: tasksForPeriod(
                                         store.document.tasks,
                                         scope,
@@ -1027,6 +1031,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                   Expanded(
                                     child: scope == 'month'
                                         ? MonthOverview(
+                                            showCounts: d != null,
                                             key: ValueKey(
                                               'month-${selected.year}-${selected.month}',
                                             ),
@@ -1052,6 +1057,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                                 run(() => store.toggleTask(t)),
                                           )
                                         : TaskList(
+                                            showCounts: d != null,
                                             showDates: scope != 'day',
                                             tasks: tasksForPeriod(
                                               store.document.tasks,
@@ -1188,12 +1194,14 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
 
 class TaskList extends StatelessWidget {
   final bool showDates;
+  final bool showCounts;
   final List<Todo> tasks;
   final Appearance appearance;
   final ValueChanged<Todo> edit, toggle;
   const TaskList({
     super.key,
     this.showDates = false,
+    this.showCounts = true,
     required this.tasks,
     required this.appearance,
     required this.edit,
@@ -1223,7 +1231,7 @@ class TaskList extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              if (!showDates)
+              if (!showDates && showCounts)
                 Text(
                   '${tasks.where((t) => t.done).length} / ${tasks.length}',
                   style: TextStyle(
@@ -1457,6 +1465,7 @@ class CalendarTask extends StatelessWidget {
 }
 
 class CalendarWorkspace extends StatelessWidget {
+  final bool showCounts;
   final Map<String, DateHeaderStyle> dateHeaders;
   final ValueChanged<DateTime>? editHeader;
   final Map<String, CalendarDay> calendarDays;
@@ -1472,6 +1481,7 @@ class CalendarWorkspace extends StatelessWidget {
   final VoidCallback previous, next, pickDate;
   const CalendarWorkspace({
     super.key,
+    this.showCounts = true,
     required this.appearance,
     required this.selected,
     required this.tasks,
@@ -1690,13 +1700,22 @@ class CalendarWorkspace extends StatelessWidget {
                                           ),
                                     )
                                   : Center(
-                                      child: Text(
-                                        '${items.where((t) => t.done).length}/${items.length}',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: p.accent,
-                                        ),
-                                      ),
+                                      child: !showCounts
+                                          ? Container(
+                                              width: 3,
+                                              height: 3,
+                                              decoration: BoxDecoration(
+                                                color: p.accent,
+                                                shape: BoxShape.circle,
+                                              ),
+                                            )
+                                          : Text(
+                                              '${items.where((t) => t.done).length}/${items.length}',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: p.accent,
+                                              ),
+                                            ),
                                     ),
                             ),
                           ),
@@ -1732,6 +1751,7 @@ class CalendarWorkspace extends StatelessWidget {
         ),
         Expanded(
           child: TaskList(
+            showCounts: showCounts,
             tasks: dayTasks,
             appearance: appearance,
             edit: (t) => edit(t),

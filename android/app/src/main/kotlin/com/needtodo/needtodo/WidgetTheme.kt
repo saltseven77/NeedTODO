@@ -22,10 +22,16 @@ object WidgetTheme {
         return JSONObject()
     }
     fun color(theme: JSONObject, field: String, fallback: Long) = palette(theme).optLong(field, fallback).toInt()
-    fun launch(context: Context, date: String, add: Boolean = false): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).putExtra("date", date).putExtra("add", add)
-            .setAction("com.needtodo.OPEN.$date.$add").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        return PendingIntent.getActivity(context, (date + add).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    fun launch(context: Context, date: String, add: Boolean = false, view: String = "calendar"): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).putExtra("date", date).putExtra("add", add).putExtra("view", view)
+            .setAction("com.needtodo.OPEN.$date.$add.$view").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        return PendingIntent.getActivity(context, (date + add + view).hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+    fun collectionLaunch(context: Context, id: Int, date: String): PendingIntent {
+        val intent = Intent(context,MainActivity::class.java).putExtra("date",date).putExtra("view","agenda")
+            .setAction("com.needtodo.AGENDA.$id").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val mutable = if (android.os.Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getActivity(context,id,intent,PendingIntent.FLAG_UPDATE_CURRENT or mutable)
     }
     fun background(view: RemoteViews, imageId: Int, theme: JSONObject, width: Int, height: Int) {
         val surface = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

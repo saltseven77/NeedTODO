@@ -9,16 +9,19 @@ class WidgetPreferences extends StatelessWidget {
   final bool busy;
   final void Function(VoidCallback) change;
   final void Function(String) add;
+  final VoidCallback? chooseBackground;
   const WidgetPreferences({
     super.key,
     required this.appearance,
     required this.busy,
     required this.change,
     required this.add,
+    this.chooseBackground,
   });
   @override
   Widget build(BuildContext context) {
     final p = appearance.palette;
+    final background = imageBytes(appearance.background);
     Widget card(String kind, String name, String size) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -27,7 +30,16 @@ class WidgetPreferences extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: p.background.withValues(alpha: appearance.opacity),
+              color: p.background.withValues(
+                alpha: p.background.a * appearance.opacity,
+              ),
+              image: background == null
+                  ? null
+                  : DecorationImage(
+                      image: MemoryImage(background),
+                      fit: BoxFit.cover,
+                      opacity: appearance.imageOpacity,
+                    ),
               borderRadius: BorderRadius.circular(
                 appearance.radius.clamp(0, 24),
               ),
@@ -148,6 +160,39 @@ class WidgetPreferences extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         const Text('外观', style: TextStyle(fontSize: 12, color: muted)),
+        Row(
+          children: [
+            const Expanded(child: Text('背景图片', style: TextStyle(fontSize: 12))),
+            TextButton(
+              onPressed: busy ? null : chooseBackground,
+              child: Text(background == null ? '选择图片' : '更换图片'),
+            ),
+            if (background != null)
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => change(() => appearance.background = ''),
+                child: const Text('移除'),
+              ),
+          ],
+        ),
+        if (background != null)
+          Row(
+            children: [
+              const SizedBox(
+                width: 65,
+                child: Text('图片透明度', style: TextStyle(fontSize: 12)),
+              ),
+              Expanded(
+                child: Slider(
+                  value: appearance.imageOpacity,
+                  onChanged: busy
+                      ? null
+                      : (v) => change(() => appearance.imageOpacity = v),
+                ),
+              ),
+            ],
+          ),
         ColorField('底色', p.background, (v) => change(() => p.background = v)),
         ColorField('文字', p.text, (v) => change(() => p.text = v)),
         ColorField('强调色', p.accent, (v) => change(() => p.accent = v)),

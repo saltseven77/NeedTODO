@@ -6,6 +6,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Build
+import android.net.Uri
 import android.view.View
 import android.widget.RemoteViews
 import java.time.LocalDate
@@ -35,32 +37,23 @@ class AgendaWidget : AppWidgetProvider() {
             val ink = WidgetTheme.color(theme,"text",0xff292c32); val accent = WidgetTheme.color(theme,"accent",0xff477cae)
             view.setTextViewText(R.id.agenda_title,"${today.monthValue}月${today.dayOfMonth}日  星期${arrayOf("一","二","三","四","五","六","日")[today.dayOfWeek.value-1]}")
             view.setTextColor(R.id.agenda_title,ink); view.setTextColor(R.id.agenda_add,ink)
-            view.setOnClickPendingIntent(R.id.agenda_add,WidgetTheme.launch(context,date,true))
-            view.setOnClickPendingIntent(R.id.agenda_root,WidgetTheme.launch(context,date))
-            view.removeAllViews(R.id.agenda_rows)
-            val items = snapshot.optJSONArray("tasks")
-            val tasks = mutableListOf<JSONObject>()
-            if(items != null) for(i in 0 until items.length()) {
-                val task = items.optJSONObject(i) ?: continue
-                if(task.optString("date") == date && task.optString("scope") == "day" && !task.optBoolean("done") && !task.optBoolean("deleted")) tasks.add(task)
+            view.setOnClickPendingIntent(R.id.agenda_add,WidgetTheme.launch(context,date,true,"agenda"))
+            view.setOnClickPendingIntent(R.id.agenda_root,WidgetTheme.launch(context,date,view="agenda"))
+            val tasks = AgendaRows.tasks(snapshot)
+            if (Build.VERSION.SDK_INT >= 31) {
+                val collection = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(false).setViewTypeCount(1)
+                tasks.forEachIndexed { index, task -> collection.addItem(index.toLong(), AgendaRows.view(context,task,theme)) }
+                view.setRemoteAdapter(R.id.agenda_rows,collection.build())
+            } else {
+                val adapter = Intent(context,AgendaWidgetService::class.java)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID,id).setData(Uri.parse("needtodo-widget://agenda/$id"))
+                view.setRemoteAdapter(R.id.agenda_rows,adapter)
             }
-            tasks.sortBy { if(it.isNull("startMinute")) 1441 else it.optInt("startMinute",1441) }
-            val count = ((height-54)/42).coerceIn(1,8)
-            for(task in tasks.take(count)) {
-                val row = RemoteViews(context.packageName,R.layout.agenda_widget_row)
-                val timed = !task.isNull("startMinute")
-                val start = if(timed) time(task.optInt("startMinute")) else "全天"
-                val end = if(!task.isNull("endMinute")) time(task.optInt("endMinute")) else ""
-                row.setTextViewText(R.id.agenda_time,start+if(end.isNotEmpty()) "\n$end" else "")
-                row.setTextViewText(R.id.agenda_task,task.optString("title"))
-                row.setTextColor(R.id.agenda_time,ink);row.setTextColor(R.id.agenda_task,ink)
-                row.setInt(R.id.agenda_bar,"setBackgroundColor",accent)
-                row.setOnClickPendingIntent(R.id.agenda_row,WidgetTheme.launch(context,date))
-                view.addView(R.id.agenda_rows,row)
-            }
-            view.setViewVisibility(R.id.agenda_empty,if(tasks.isEmpty()) View.VISIBLE else View.GONE)
+            view.setPendingIntentTemplate(R.id.agenda_rows,WidgetTheme.collectionLaunch(context,id,date))
+            view.setEmptyView(R.id.agenda_rows,R.id.agenda_empty)
             view.setTextColor(R.id.agenda_empty,ink)
             manager.updateAppWidget(id,view)
+            if (Build.VERSION.SDK_INT < 31) manager.notifyAppWidgetViewDataChanged(id,R.id.agenda_rows)
         }
     }
 }

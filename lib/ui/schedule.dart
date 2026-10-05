@@ -10,7 +10,13 @@ import 'components.dart';
 class TaskProgress extends StatelessWidget {
   final List<Todo> tasks;
   final Color color;
-  const TaskProgress({super.key, required this.tasks, required this.color});
+  final bool showCounts;
+  const TaskProgress({
+    super.key,
+    required this.tasks,
+    required this.color,
+    this.showCounts = true,
+  });
   @override
   Widget build(BuildContext context) {
     final done = tasks.where((t) => t.done).length;
@@ -29,11 +35,12 @@ class TaskProgress extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          Text(
-            '$done / ${tasks.length}',
-            style: TextStyle(fontSize: 11, color: color),
-          ),
+          if (showCounts) const SizedBox(width: 12),
+          if (showCounts)
+            Text(
+              '$done / ${tasks.length}',
+              style: TextStyle(fontSize: 11, color: color),
+            ),
         ],
       ),
     );

@@ -32,8 +32,9 @@ class MainActivity : FlutterActivity() {
                 "widgetLaunch" -> { result.success(intent?.getStringExtra("date")); intent?.removeExtra("date") }
                 "widgetLaunchAction" -> {
                     val date = intent?.getStringExtra("date")
-                    result.success(if(date == null) null else mapOf("date" to date,"add" to intent.getBooleanExtra("add",false)))
+                    result.success(if(date == null) null else mapOf("date" to date,"add" to intent.getBooleanExtra("add",false),"view" to (intent.getStringExtra("view") ?: "calendar")))
                     intent?.removeExtra("date");intent?.removeExtra("add")
+                    intent?.removeExtra("view")
                 }
                 else -> result.notImplemented()
             }
@@ -42,6 +43,6 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.getStringExtra("date")?.let { channel?.invokeMethod("widgetAction", mapOf("date" to it,"add" to intent.getBooleanExtra("add",false))) }
+        intent.getStringExtra("date")?.let { channel?.invokeMethod("widgetAction", mapOf("date" to it,"add" to intent.getBooleanExtra("add",false),"view" to (intent.getStringExtra("view") ?: "calendar"))) }
     }
 }
