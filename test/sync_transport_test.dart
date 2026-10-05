@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:async';
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -59,7 +62,55 @@ class ReadableCloud extends AppStore {
   }
 }
 
+class FirstLogin extends AppStore {
+  final finish = Completer<void>();
+  FirstLogin(super.storage);
+  @override
+  Future<Map<String, dynamic>> request(
+    String method,
+    String path, [
+    Map<String, dynamic>? body,
+  ]) async => {
+    'token': 'fixture-token',
+    'account': {'id': 'fixture', 'username': 'fixture', 'githubLogin': 'bound'},
+  };
+  @override
+  Future<void> sync() => finish.future;
+}
+
 void main() {
+  test(
+    'first login waits for complete sync before entering the workspace',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final store = FirstLogin(MemoryStorage());
+      final login = store.authenticate('fixture', 'password-123', false);
+      await Future<void>.delayed(Duration.zero);
+      expect(store.account, isNotNull);
+      expect(store.entered, false);
+      store.finish.complete();
+      await login;
+      expect(store.entered, true);
+      await store.shutdown();
+    },
+  );
+  test(
+    'failed first sync stays at login without saving a half-ready session',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final storage = MemoryStorage();
+      final store = FirstLogin(storage);
+      final login = store.authenticate('fixture', 'password-123', false);
+      final failure = expectLater(login, throwsA(isA<http.ClientException>()));
+      await Future<void>.delayed(Duration.zero);
+      store.finish.completeError(http.ClientException('interrupted'));
+      await failure;
+      expect(store.entered, false);
+      expect(store.account, isNull);
+      expect(storage.values.containsKey('session'), false);
+      await store.shutdown();
+    },
+  );
   test(
     'a truncated sync response is retried including body stream errors',
     () async {

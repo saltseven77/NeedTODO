@@ -147,6 +147,7 @@ class AppStore extends ChangeNotifier {
 
   Map<String, dynamic>? account;
   bool local = false, ready = false, syncing = false;
+  bool _signingIn = false;
   String? error;
   String _token = '';
   int revision = 0;
@@ -199,7 +200,7 @@ class AppStore extends ChangeNotifier {
     this.vault = const FlutterSecureStorage(),
     http.Client? httpClient,
   }) : client = httpClient ?? http.Client();
-  bool get entered => local || account != null;
+  bool get entered => !_signingIn && (local || account != null);
   bool get githubBound => (account?['githubLogin'] as String? ?? '').isNotEmpty;
   bool get canCloudSync => account != null && githubBound;
   String get _key => account == null
@@ -497,34 +498,53 @@ class AppStore extends ChangeNotifier {
     bool register,
   ) async {
     await flushDrafts();
-    final result = await request(
-      'POST',
-      register ? '/v2/auth/register' : '/v2/auth/login',
-      {'username': username, 'password': password},
-    );
-    final token = result['token'];
-    final user = object(result['account']);
-    if (token is! String || user['id'] is! String) throw Exception('登录响应无效');
-    await _writes;
-    await vault.write(key: 'session', value: token);
-    await storage.write('session', {'local': false, 'account': user});
-    account = user;
-    _token = token;
-    local = false;
-    revision = 0;
-    generation++;
-    final saved = await storage.read(_key);
-    await _loadDeviceSettings();
-    _acceptShared(
-      saved == null ? Document() : Document.fromJson(object(saved['document'])),
-    );
-    revision = saved?['revision'] ?? 0;
-    notifyListeners();
-    onDocumentChanged?.call();
+    final previousAccount = account,
+        previousToken = _token,
+        previousDocument = document,
+        previousLocal = local,
+        previousRevision = revision,
+        previousSettings = _deviceSettings,
+        previousShared = _sharedStyles;
+    _signingIn = true;
     try {
+      final result = await request(
+        'POST',
+        register ? '/v2/auth/register' : '/v2/auth/login',
+        {'username': username, 'password': password},
+      );
+      final token = result['token'];
+      final user = object(result['account']);
+      if (token is! String || user['id'] is! String) throw Exception('登录响应无效');
+      await _writes;
+      account = user;
+      _token = token;
+      local = false;
+      revision = 0;
+      generation++;
+      final saved = await storage.read(_key);
+      await _loadDeviceSettings();
+      _acceptShared(
+        saved == null
+            ? Document()
+            : Document.fromJson(object(saved['document'])),
+      );
+      revision = saved?['revision'] ?? 0;
       await sync();
-    } catch (e) {
-      setError(e);
+      await vault.write(key: 'session', value: token);
+      await storage.write('session', {'local': false, 'account': user});
+    } catch (_) {
+      account = previousAccount;
+      _token = previousToken;
+      document = previousDocument;
+      local = previousLocal;
+      revision = previousRevision;
+      _deviceSettings = previousSettings;
+      _sharedStyles = previousShared;
+      rethrow;
+    } finally {
+      _signingIn = false;
+      notifyListeners();
+      onDocumentChanged?.call();
     }
   }
 
