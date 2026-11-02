@@ -256,14 +256,7 @@ class _DayTimelineState extends State<DayTimeline> {
                           key: ValueKey('timeline-event-${e.task.id}'),
                           clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
-                            color: Color.alphaBlend(
-                              appearance
-                                  .taskColor(e.task.level)
-                                  .withValues(alpha: e.task.done ? .09 : .20),
-                              appearance.palette.background.withValues(
-                                alpha: .92,
-                              ),
-                            ),
+                            color: appearance.taskColor(e.task.level),
                             borderRadius: BorderRadius.circular(5),
                           ),
                           child: Stack(
@@ -308,7 +301,9 @@ class _DayTimelineState extends State<DayTimeline> {
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w500,
-                                            color: appearance.palette.text,
+                                            color: appearance.taskTextColor(
+                                              e.task.level,
+                                            ),
                                             decoration: e.task.done
                                                 ? TextDecoration.lineThrough
                                                 : null,
@@ -320,8 +315,17 @@ class _DayTimelineState extends State<DayTimeline> {
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 10,
-                                            color: appearance.palette.text
-                                                .withValues(alpha: .6),
+                                            color: appearance
+                                                .taskTextColor(e.task.level)
+                                                .withValues(
+                                                  alpha:
+                                                      appearance
+                                                          .taskTextColor(
+                                                            e.task.level,
+                                                          )
+                                                          .a *
+                                                      .6,
+                                                ),
                                           ),
                                         ),
                                       ],
