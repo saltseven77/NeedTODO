@@ -13,6 +13,8 @@ import 'store.dart';
 import 'platform_services.dart';
 import 'ui/components.dart';
 import 'ui/reminder_popup.dart';
+import 'updates.dart';
+import 'ui/update_preferences.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -157,6 +159,23 @@ Future<void> main(List<String> args) async {
     await store.load();
     if (calendarOnly && !store.entered) await desktop?.expand();
     runApp(NeedTodoApp(store: store, desktop: desktop, services: services));
+    if (!secondary) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(
+          appUpdates.check().then((update) async {
+            final context = updateNavigatorKey.currentContext;
+            if (update != null &&
+                context != null &&
+                context.mounted &&
+                !calendarOnly &&
+                desktop?.collapsed != true) {
+              await showReleaseUpdate(context, update);
+            }
+          }),
+        );
+      });
+    }
+
     if (startup?.calendar == true) {
       bool opened = false;
       void openStartupCalendar() {

@@ -20,6 +20,7 @@ import 'holiday_calendar.dart';
 import 'ui/reminder_popup.dart';
 import 'ui/categories.dart';
 import 'ui/floating_note.dart';
+import 'ui/update_preferences.dart';
 import 'ui/journal.dart';
 import 'ui/account_recovery.dart';
 
@@ -36,6 +37,7 @@ class NeedTodoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: '泥土豆',
+    navigatorKey: updateNavigatorKey,
     debugShowCheckedModeBanner: false,
     theme: appTheme(),
     locale: const Locale('zh', 'CN'),

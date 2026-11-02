@@ -9,6 +9,7 @@ import '../store.dart';
 import 'components.dart';
 import 'settings.dart';
 import 'widget_preferences.dart';
+import 'update_preferences.dart';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -1180,6 +1181,7 @@ class _SettingsViewState extends State<SettingsView> {
                   ],
                 ),
               ),
+            if (tab == 'account') section('软件更新', const UpdatePreferences()),
             if (error != null)
               Text(
                 error!,
