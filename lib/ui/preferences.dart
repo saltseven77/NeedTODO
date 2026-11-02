@@ -1062,21 +1062,6 @@ class _SettingsViewState extends State<SettingsView> {
                     ),
                     const SizedBox(height: 10),
                     ReminderPreview(style: reminders),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => run(
-                                () => widget.store.dispatch({
-                                  'type': 'testReminder',
-                                  'reminders': reminders.toJson(),
-                                }),
-                              ),
-                        child: const Text('3秒后测试提醒'),
-                      ),
-                    ),
                   ],
                 ),
               ),

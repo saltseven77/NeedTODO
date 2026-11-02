@@ -9,6 +9,7 @@ import 'package:needtodo/app.dart';
 import 'package:needtodo/model.dart';
 import 'package:needtodo/store.dart';
 import 'package:needtodo/platform_services.dart';
+import 'package:needtodo/ui/floating_note.dart';
 
 import 'memory_storage.dart';
 
@@ -99,6 +100,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('24小时'));
     await tester.pumpAndSettle();
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, 420),
+    );
     await shot('timeline');
     await tester.tap(find.text('任务'));
     await tester.pumpAndSettle();
@@ -132,6 +137,26 @@ void main() {
     await tester.ensureVisible(find.text('日程'));
     await tester.tap(find.text('日程'));
     await shot('reminder-settings');
+    tester.view.physicalSize = const Size(380, 330);
+    final noteDesktop = DesktopController(MemoryStorage(), calendar: false)
+      ..collapsed = true
+      ..noteVisible = true;
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+          home: FloatingNote(
+            desktop: noteDesktop,
+            appearance: store.document.list,
+            tasks: store.document.tasks,
+            open: () {},
+            menu: () {},
+          ),
+        ),
+      ),
+    );
+    await shot('floating-note');
     await tester.pumpWidget(const SizedBox());
+    noteDesktop.dispose();
   });
 }

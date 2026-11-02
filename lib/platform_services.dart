@@ -495,6 +495,18 @@ class PlatformServices {
   }
 }
 
+Rect floatingNoteBounds(Rect anchor, Rect workArea) {
+  final left = anchor.left + 380 <= workArea.right
+      ? anchor.left
+      : anchor.right - 380;
+  return Rect.fromLTWH(
+    left.clamp(workArea.left, workArea.right - 380).toDouble(),
+    anchor.top.clamp(workArea.top, workArea.bottom - 330).toDouble(),
+    380,
+    330,
+  );
+}
+
 class DesktopController extends ChangeNotifier with WindowListener {
   final JsonStorage storage;
   final bool calendar;
@@ -679,7 +691,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
   }
 
   Future<void> saveNow() async {
-    if (busy || maximized) return;
+    if (busy || maximized || noteVisible) return;
     final r = await windowManager.getBounds();
     if (collapsed) {
       ball = r;
@@ -712,6 +724,53 @@ class DesktopController extends ChangeNotifier with WindowListener {
     }
   }
 
+  bool noteVisible = false;
+  Offset noteBallOffset = Offset.zero;
+  Rect? _noteAnchor;
+  Future<void> _noteWork = Future.value();
+  Future<void> showBallNote(bool visible) {
+    final work = _noteWork.then((_) async {
+      if (!collapsed || busy || visible == noteVisible) return;
+      busy = true;
+      try {
+        if (visible) {
+          _noteAnchor = await windowManager.getBounds();
+          final displays = await screenRetriever.getAllDisplays();
+          final display =
+              displays
+                  .where(
+                    (d) => Rect.fromLTWH(
+                      d.visiblePosition?.dx ?? 0,
+                      d.visiblePosition?.dy ?? 0,
+                      d.visibleSize?.width ?? d.size.width,
+                      d.visibleSize?.height ?? d.size.height,
+                    ).contains(_noteAnchor!.center),
+                  )
+                  .firstOrNull ??
+              await screenRetriever.getPrimaryDisplay();
+          final origin = display.visiblePosition ?? Offset.zero;
+          final size = display.visibleSize ?? display.size;
+          final target = floatingNoteBounds(_noteAnchor!, origin & size);
+          noteBallOffset = _noteAnchor!.topLeft - target.topLeft;
+          noteVisible = true;
+          notifyListeners();
+          await windowManager.setBounds(target);
+        } else {
+          final anchor = _noteAnchor;
+          noteVisible = false;
+          noteBallOffset = Offset.zero;
+          if (anchor != null) await windowManager.setBounds(anchor);
+          _noteAnchor = null;
+          notifyListeners();
+        }
+      } finally {
+        busy = false;
+      }
+    });
+    _noteWork = work.catchError((Object _) {});
+    return work;
+  }
+
   Future<void> collapse() async {
     if (busy || collapsed) return;
     if (maximized) {
@@ -740,6 +799,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
   }
 
   Future<void> expand() async {
+    await showBallNote(false);
     if (busy) return;
     busy = true;
     _edgeTimer?.cancel();
@@ -944,6 +1004,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
   }
 
   Future<void> hideToTray() async {
+    await showBallNote(false);
     await saveNow();
     await windowManager.hide();
   }
@@ -952,6 +1013,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
     if (_quitting) return;
     _quitting = true;
     try {
+      await showBallNote(false);
       await saveNow();
       await onClose?.call();
       if (trayReady) {

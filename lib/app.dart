@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:app_links/app_links.dart';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -18,6 +19,7 @@ import 'ui/schedule.dart';
 import 'holiday_calendar.dart';
 import 'ui/reminder_popup.dart';
 import 'ui/categories.dart';
+import 'ui/floating_note.dart';
 import 'ui/journal.dart';
 import 'ui/account_recovery.dart';
 
@@ -617,19 +619,15 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     }
     final p = a.palette, d = widget.desktop;
     if (d?.collapsed == true) {
-      return Material(
-        color: Colors.transparent,
-        child: GestureDetector(
-          onPanStart: (_) => windowManager.startDragging(),
-          onTap: () => run(d!.expand),
-          onSecondaryTap: () => run(() => native.invokeMethod('trayMenu')),
-          onLongPress: () => run(() => native.invokeMethod('trayMenu')),
-          child: Center(
-            child: Identity(data: store.document.list.floatingImage, size: 60),
-          ),
-        ),
+      return FloatingNote(
+        desktop: d!,
+        appearance: store.document.list,
+        tasks: tasksForPeriod(store.document.tasks, 'day', today),
+        open: () => run(d.expand),
+        menu: () => run(() => native.invokeMethod('trayMenu')),
       );
     }
+
     if (d?.docked != null) {
       return Material(
         color: Colors.transparent,
@@ -860,7 +858,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                           ),
                                         ),
                                         const Spacer(),
-                                        if (dayKey(selected) != dayKey(today))
+                                        if (periodKey(scope, selected) !=
+                                            periodKey(scope, today))
                                           TextButton(
                                             style: TextButton.styleFrom(
                                               minimumSize: const Size(0, 32),
@@ -873,7 +872,11 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                               () => selected = today,
                                             ),
                                             child: Text(
-                                              '回到今天',
+                                              scope == 'week'
+                                                  ? '回到本周'
+                                                  : scope == 'month'
+                                                  ? '回到本月'
+                                                  : '回到今天',
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 color: p.accent,
@@ -981,16 +984,6 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                           );
                                         }),
                                       ),
-                                    ),
-                                  if (scope == 'week')
-                                    TaskProgress(
-                                      showCounts: d != null,
-                                      tasks: tasksForPeriod(
-                                        store.document.tasks,
-                                        scope,
-                                        selected,
-                                      ),
-                                      color: p.accent,
                                     ),
                                   if (scope == 'day')
                                     Align(
@@ -1999,13 +1992,17 @@ class _TaskEditorState extends State<TaskEditor> {
         ),
       ),
       if (reminder != null)
-        SizedBox(
-          height: 150,
-          child: CupertinoDatePicker(
-            mode: CupertinoDatePickerMode.dateAndTime,
-            initialDateTime: reminder,
-            use24hFormat: true,
-            onDateTimeChanged: (d) => setState(() => reminder = d),
+        ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context)
+              .copyWith(dragDevices: PointerDeviceKind.values.toSet()),
+          child: SizedBox(
+            height: 180,
+            child: CupertinoDatePicker(
+              mode: CupertinoDatePickerMode.dateAndTime,
+              initialDateTime: reminder,
+              use24hFormat: true,
+              onDateTimeChanged: (d) => setState(() => reminder = d),
+            ),
           ),
         ),
       const SizedBox(height: 12),

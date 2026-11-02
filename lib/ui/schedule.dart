@@ -252,68 +252,85 @@ class _DayTimelineState extends State<DayTimeline> {
                       height: (e.layoutEnd - e.start) / 60 * 52,
                       child: Tooltip(
                         message: '${taskTimeLabel(e.task)} ${e.task.title}',
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: 0,
-                              top: 0,
-                              height: math.max(
-                                2.0,
-                                (e.end - e.start) / 60 * 52,
-                              ),
-                              width: 4,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: appearance
-                                      .taskColor(e.task.level)
-                                      .withValues(alpha: e.task.done ? .4 : 1),
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
+                        child: Container(
+                          key: ValueKey('timeline-event-${e.task.id}'),
+                          clipBehavior: Clip.antiAlias,
+                          decoration: BoxDecoration(
+                            color: Color.alphaBlend(
+                              appearance
+                                  .taskColor(e.task.level)
+                                  .withValues(alpha: e.task.done ? .09 : .20),
+                              appearance.palette.background.withValues(
+                                alpha: .92,
                               ),
                             ),
-                            Positioned(
-                              top: 0,
-                              left: 10,
-                              right: 1,
-                              child: InkWell(
-                                onTap: () => edit(e.task),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 2,
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        e.task.title,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                          color: appearance.palette.text,
-                                          decoration: e.task.done
-                                              ? TextDecoration.lineThrough
-                                              : null,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                left: 0,
+                                top: 0,
+                                height: math.max(
+                                  2.0,
+                                  (e.end - e.start) / 60 * 52,
+                                ),
+                                width: 4,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: appearance
+                                        .taskColor(e.task.level)
+                                        .withValues(
+                                          alpha: e.task.done ? .4 : 1,
                                         ),
-                                      ),
-                                      Text(
-                                        taskTimeLabel(e.task),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          color: appearance.palette.text
-                                              .withValues(alpha: .6),
-                                        ),
-                                      ),
-                                    ],
+                                    borderRadius: BorderRadius.circular(2),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                              Positioned(
+                                top: 0,
+                                left: 10,
+                                right: 1,
+                                child: InkWell(
+                                  onTap: () => edit(e.task),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 2,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          e.task.title,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                            color: appearance.palette.text,
+                                            decoration: e.task.done
+                                                ? TextDecoration.lineThrough
+                                                : null,
+                                          ),
+                                        ),
+                                        Text(
+                                          taskTimeLabel(e.task),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: appearance.palette.text
+                                                .withValues(alpha: .6),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

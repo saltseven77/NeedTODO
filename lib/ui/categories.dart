@@ -303,8 +303,20 @@ class _CategoryProgressState extends State<_CategoryProgress> {
   bool expanded = false;
   @override
   Widget build(BuildContext context) {
-    final p = widget.appearance.palette,
-        done = widget.tasks.where((task) => task.done).length;
+    final p = widget.appearance.palette;
+    final minutes = widget.tasks.fold<int>(
+      0,
+      (total, task) =>
+          total +
+          (task.startMinute != null &&
+                  task.endMinute != null &&
+                  task.endMinute! > task.startMinute!
+              ? task.endMinute! - task.startMinute!
+              : 0),
+    );
+    final duration = minutes < 60
+        ? '$minutes 分钟'
+        : '${minutes ~/ 60} 小时${minutes % 60 == 0 ? '' : ' ${minutes % 60} 分钟'}';
     final base = p.text.computeLuminance() < .45
         ? Color.alphaBlend(p.background.withValues(alpha: .25), Colors.white)
         : p.background.withValues(alpha: 1);
@@ -347,31 +359,16 @@ class _CategoryProgressState extends State<_CategoryProgress> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    SizedBox(
-                      width: 64,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(1),
-                        child: LinearProgressIndicator(
-                          value: done / widget.tasks.length,
-                          minHeight: 2,
-                          color: p.accent,
-                          backgroundColor: p.accent.withValues(alpha: .13),
+                    Flexible(
+                      child: Text(
+                        '$duration · ${widget.tasks.length} 项计划',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: p.text.withValues(alpha: .6),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    if (widget.showCounts)
-                      SizedBox(
-                        width: 38,
-                        child: Text(
-                          '$done / ${widget.tasks.length}',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: p.text.withValues(alpha: .6),
-                          ),
-                        ),
-                      ),
                     const SizedBox(width: 10),
                     AnimatedRotation(
                       turns: expanded ? .5 : 0,

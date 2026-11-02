@@ -37,7 +37,7 @@ void main() {
   });
 
   testWidgets(
-    'month view reports completion by category including uncategorized tasks',
+    'month view reports planned duration and count including untimed tasks',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -49,6 +49,8 @@ void main() {
                   title: '阅读',
                   date: '2026-10-01',
                   category: '学习',
+                  startMinute: 540,
+                  endMinute: 630,
                   done: true,
                 ),
                 Todo(title: '写作', date: '2026-10-01', category: '学习'),
@@ -65,8 +67,8 @@ void main() {
       );
       expect(find.text('学习'), findsOneWidget);
       expect(find.text('未分类'), findsOneWidget);
-      expect(find.text('1 / 2'), findsOneWidget);
-      expect(find.text('1 / 1'), findsOneWidget);
+      expect(find.text('1 小时 30 分钟 · 2 项计划'), findsOneWidget);
+      expect(find.text('0 分钟 · 1 项计划'), findsOneWidget);
       expect(find.text('完美打卡 1 天'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
