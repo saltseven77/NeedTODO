@@ -145,6 +145,8 @@ void main() {
       RepaintBoundary(
         key: boundary,
         child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(fontFamily: 'Segoe UI'),
           home: FloatingNote(
             desktop: noteDesktop,
             appearance: store.document.list,
