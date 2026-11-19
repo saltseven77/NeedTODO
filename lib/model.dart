@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'course.dart';
+
 import 'package:flutter/material.dart';
 
 String newId() =>
@@ -491,6 +493,7 @@ MonthCheckins monthCheckins(List<Todo> tasks, DateTime month, DateTime today) {
 }
 
 class Document {
+  List<Course> courses;
   List<Todo> tasks;
   Appearance list, calendar;
   ReminderStyle reminders;
@@ -499,6 +502,7 @@ class Document {
   Map<String, DateHeaderStyle> dateHeaders;
   DateTime appearanceUpdated;
   Document({
+    List<Course>? courses,
     List<Todo>? tasks,
     Appearance? list,
     Appearance? calendar,
@@ -507,7 +511,8 @@ class Document {
     Map<String, JournalWeek>? journals,
     Map<String, DateHeaderStyle>? dateHeaders,
     DateTime? appearanceUpdated,
-  }) : journals = journals ?? {},
+  }) : courses = courses ?? [],
+       journals = journals ?? {},
        dateHeaders = dateHeaders ?? {},
        reminders = reminders ?? ReminderStyle(),
        holidays = holidays ?? [],
@@ -519,6 +524,7 @@ class Document {
            DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   Map<String, dynamic> toJson() => {
     'version': 2,
+    'courses': courses.map((c) => c.toJson()).toList(),
     'journals': journals.map((key, value) => MapEntry(key, value.toJson())),
     'dateHeaders': dateHeaders.map(
       (key, value) => MapEntry(key, value.toJson()),
@@ -534,6 +540,9 @@ class Document {
     final profiles = object(j['profiles']);
     final legacyUpdated = j['appearanceUpdated'];
     return Document(
+      courses: (j['courses'] as List? ?? [])
+          .map((e) => Course.fromJson(object(e)))
+          .toList(),
       journals: object(j['journals']).map(
         (key, value) => MapEntry(key, JournalWeek.fromJson(key, object(value))),
       ),

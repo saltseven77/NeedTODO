@@ -129,8 +129,18 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
       if(!record(dateHeaders)||Object.keys(dateHeaders).length>50000)throw fail(400,'日期颜色无效');
       for(const [date,style] of Object.entries(dateHeaders))if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!record(style)||!Number.isFinite(Date.parse(style.updated))||(style.color!==null&&(!Number.isSafeInteger(style.color)||style.color<0||style.color>0xffffffff)))throw fail(400,'日期颜色无效');
     }
+    if(d.courses!==undefined){
+      if(!Array.isArray(d.courses)||d.courses.length>5000)throw fail(400,'课程数据无效');
+      const seen=new Set();
+      d.courses=d.courses.map(c=>{
+        if(!c||typeof c.id!=='string'||!c.id||c.id.length>100||seen.has(c.id)||!Number.isFinite(Date.parse(c.updated)))throw fail(400,'课程数据无效');
+        seen.add(c.id); if(c.deleted===true)return{id:c.id,deleted:true,updated:c.updated};
+        if(typeof c.name!=='string'||!c.name.trim()||c.name.length>160||typeof c.room!=='string'||c.room.length>160||typeof c.teacher!=='string'||c.teacher.length>160||typeof c.level!=='string'||c.level.length>100||!/^\d{4}-\d{2}-\d{2}$/.test(c.termStart)||!Number.isFinite(Date.parse(c.termStart))||![c.weekday,c.start,c.end,c.firstWeek,c.lastWeek,c.parity].every(Number.isSafeInteger)||c.weekday<1||c.weekday>7||c.start<0||c.end>1440||c.end<=c.start||c.firstWeek<1||c.lastWeek>52||c.lastWeek<c.firstWeek||![0,1,2].includes(c.parity))throw fail(400,'课程数据无效');
+        return c;
+      });
+    }
     // Client account/token/roles and desktop geometry never enter the document.
-    return { version: 2, tasks, list: d.list, calendar: d.calendar, reminders: d.reminders, holidays: d.holidays, appearanceUpdated: d.appearanceUpdated,...(journals!==undefined?{journals}:{}),...(dateHeaders!==undefined?{dateHeaders}:{}) };
+    return { ...(d.courses!==undefined?{courses:d.courses}:{}), version: 2, tasks, list: d.list, calendar: d.calendar, reminders: d.reminders, holidays: d.holidays, appearanceUpdated: d.appearanceUpdated,...(journals!==undefined?{journals}:{}),...(dateHeaders!==undefined?{dateHeaders}:{}) };
   }
   async function route(req, res) {
     const url = new URL(req.url, 'http://localhost');
@@ -177,7 +187,12 @@ export function service({ database = process.env.DATABASE || './data/needtodo.sq
         // Older clients don't know these fields; their sync must not erase them.
         if(current){
           const previous=JSON.parse(current.body);
-          for(const key of ['journals','dateHeaders'])if(doc[key]===undefined&&previous[key]!==undefined)doc[key]=previous[key];
+          for(const key of ['journals','dateHeaders','courses'])if(doc[key]===undefined&&previous[key]!==undefined)doc[key]=previous[key];
+          if(doc.courses&&previous.courses){
+            const courses=new Map(previous.courses.map(c=>[c.id,c]));
+            for(const c of doc.courses){const old=courses.get(c.id);if(!old||Date.parse(c.updated)>=Date.parse(old.updated))courses.set(c.id,c);}
+            doc.courses=[...courses.values()];
+          }
           if(doc.journals&&previous.journals){
             const preserve=(incoming,old=[])=>{
               const known=new Map(old.map(item=>[item.id,item]));

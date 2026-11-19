@@ -22,6 +22,7 @@ import 'ui/categories.dart';
 import 'ui/floating_note.dart';
 import 'ui/update_preferences.dart';
 import 'ui/journal.dart';
+import 'ui/timetable.dart';
 import 'ui/account_recovery.dart';
 
 class NeedTodoApp extends StatelessWidget {
@@ -316,6 +317,7 @@ class Workspace extends StatefulWidget {
 class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   bool calendar = false;
   bool journal = false;
+  bool timetable = false;
   bool showAgenda = false;
   bool? timelineOverride;
   bool get timeline => timelineOverride ?? store.document.reminders.timeline;
@@ -362,6 +364,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           scope = task.scope;
           calendar = false;
           journal = false;
+          timetable = false;
         });
       };
     });
@@ -425,6 +428,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       showAgenda = calendar;
       scope = 'day';
       journal = false;
+      timetable = false;
     });
     if (value['add'] == true) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -718,8 +722,22 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             ? CupertinoIcons.list_bullet
                             : CupertinoIcons.book,
                         journal ? '返回清单' : '日记',
-                        () => setState(() => journal = !journal),
+                        () => setState(() {
+                          journal = !journal;
+                          timetable = false;
+                        }),
                         color: journal ? p.accent : p.text,
+                        compact: d != null,
+                      ),
+                    if (!calendar)
+                      ActionIcon(
+                        CupertinoIcons.square_grid_2x2,
+                        '课程表',
+                        () => setState(() {
+                          timetable = !timetable;
+                          journal = false;
+                        }),
+                        color: timetable ? p.accent : p.text,
                         compact: d != null,
                       ),
                     ActionIcon(
@@ -783,6 +801,8 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             next: () => shift(1),
                             pickDate: pickDate,
                           )
+                        : timetable
+                        ? Timetable(store: store)
                         : journal
                         ? JournalWorkspace(
                             store: store,
@@ -1152,9 +1172,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
           run(() async {
             await store.flushDrafts();
             if (!mounted) return;
-            if (journal || calendar) {
+            if (journal || calendar || timetable) {
               setState(() {
                 journal = false;
+                timetable = false;
                 calendar = false;
               });
             } else {

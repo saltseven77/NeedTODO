@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'model.dart';
+import 'course.dart';
 import 'storage.dart';
 
 Document mergeDocuments(Document local, Document remote) {
@@ -23,7 +24,14 @@ Document mergeDocuments(Document local, Document remote) {
   final appearance = local.appearanceUpdated.isBefore(remote.appearanceUpdated)
       ? remote
       : local;
+  final courses = {for (final c in remote.courses) c.id: c};
+  for (final c in local.courses) {
+    if (courses[c.id] == null || !c.updated.isBefore(courses[c.id]!.updated)) {
+      courses[c.id] = c;
+    }
+  }
   return Document(
+    courses: courses.values.toList(),
     journals: (() {
       final entries = {...remote.journals};
       for (final entry in local.journals.entries) {
@@ -307,6 +315,14 @@ class AppStore extends ChangeNotifier {
       final settings = {..._deviceSettings};
       bool settingsOnly = false;
       switch (action['type']) {
+        case 'course':
+          final course = Course.fromJson(object(action['value']));
+          final index = next.courses.indexWhere((c) => c.id == course.id);
+          if (index < 0) {
+            next.courses.add(course);
+          } else {
+            next.courses[index] = course;
+          }
         case 'journal':
           final key = action['week'] as String;
           final incoming = JournalWeek.fromJson(key, object(action['value']));

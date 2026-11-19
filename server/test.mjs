@@ -54,6 +54,17 @@ test('accounts isolate documents, reject stale writes, revoke sessions, and bind
   for(const field of ['rotation','layer','points','strokeWidth'])delete degraded[field];
   const compatible=await req('/v2/sync','PUT',{revision:4,document:{...document,journals:{'2026-09-28':{...journal,board:[degraded]}}}},a);
   assert.equal(compatible.status,200);assert.deepEqual(compatible.data.document.journals['2026-09-28'].board,[marker]);
+  const course={id:'course-1',name:'高等数学',room:'A101',teacher:'张老师',level:'normal',termStart:'2026-11-16',weekday:1,start:540,end:630,firstWeek:1,lastWeek:20,parity:1,updated:'2026-11-19T00:00:00.000Z'};
+  const timetable=await req('/v2/sync','PUT',{revision:5,document:{...document,courses:[course]}},a);
+  assert.equal(timetable.status,200);assert.deepEqual(timetable.data.document.courses,[course]);
+  const oldClient=await req('/v2/sync','PUT',{revision:6,document},a);
+  assert.equal(oldClient.status,200);assert.deepEqual(oldClient.data.document.courses,[course]);
+  assert.equal((await req('/v2/sync','PUT',{revision:7,document:{...document,courses:[{...course,end:500}]}},a)).status,400);
+  const tombstone={id:course.id,deleted:true,updated:'2026-11-19T00:01:00.000Z'};
+  assert.equal((await req('/v2/sync','PUT',{revision:7,document:{...document,courses:[tombstone]}},a)).status,200);
+  const staleCourse=await req('/v2/sync','PUT',{revision:8,document:{...document,courses:[course]}},a);
+  assert.equal(staleCourse.status,200);assert.deepEqual(staleCourse.data.document.courses,[tombstone]);
+
   assert.equal((await req('/v2/auth/login','POST',{username:'alice',password:'x'.repeat(17000)})).status,413);
   const bindB=await req('/v2/github/bind','POST',{},b);challenge=new URL(bindB.data.url).searchParams.get('code_challenge');const stateB=new URL(bindB.data.url).searchParams.get('state');assert.equal((await req('/v2/github/callback?state='+stateB+'&code=mock')).status,409);
   assert.equal((await req('/v2/github/status','POST',{ticket:start.data.ticket},b)).status,410);

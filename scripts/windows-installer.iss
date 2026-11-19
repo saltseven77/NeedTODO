@@ -1,5 +1,5 @@
 #ifndef AppReleaseVersion
-  #define AppReleaseVersion "1.0.6"
+  #define AppReleaseVersion "1.0.7"
 #endif
 
 [Setup]

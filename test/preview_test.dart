@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:needtodo/app.dart';
 import 'package:needtodo/model.dart';
+import 'package:needtodo/course.dart';
+import 'package:needtodo/ui/timetable.dart';
 import 'package:needtodo/store.dart';
 import 'package:needtodo/platform_services.dart';
 import 'package:needtodo/ui/floating_note.dart';
@@ -137,6 +139,55 @@ void main() {
     await tester.ensureVisible(find.text('日程'));
     await tester.tap(find.text('日程'));
     await shot('reminder-settings');
+    final now = DateTime.now();
+    store.document.courses = [
+      Course(
+        name: '计算机网络',
+        room: '教学楼 A302',
+        teacher: '王老师',
+        termStart: now,
+        weekday: now.weekday,
+        start: 540,
+        end: 630,
+      ),
+      Course(
+        name: '高等数学',
+        room: '理科楼 B201',
+        teacher: '李老师',
+        termStart: now,
+        weekday: now.weekday,
+        start: 660,
+        end: 750,
+        level: 'important',
+      ),
+      Course(
+        name: '大学英语',
+        room: '外语楼 205',
+        termStart: now,
+        weekday: 1,
+        start: 600,
+        end: 690,
+        level: 'urgent',
+      ),
+    ];
+    for (final size in [const Size(390, 844), const Size(1100, 800)]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: boundary,
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(fontFamily: 'Segoe UI'),
+            home: Scaffold(
+              body: SafeArea(
+                child: Timetable(key: UniqueKey(), store: store),
+              ),
+            ),
+          ),
+        ),
+      );
+      await shot(size.width < 760 ? 'timetable-phone' : 'timetable-desktop');
+    }
     tester.view.physicalSize = const Size(380, 330);
     final noteDesktop = DesktopController(MemoryStorage(), calendar: false)
       ..collapsed = true
