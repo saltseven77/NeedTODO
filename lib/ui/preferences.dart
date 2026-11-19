@@ -9,6 +9,7 @@ import '../store.dart';
 import 'components.dart';
 import 'settings.dart';
 import 'widget_preferences.dart';
+import 'timetable.dart' show CourseGridEditor;
 import 'update_preferences.dart';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -107,6 +108,7 @@ class _SettingsViewState extends State<SettingsView> {
   late final drafts = {
     'list': widget.store.document.list.clone(),
     'calendar': widget.store.document.calendar.clone(),
+    'timetable': widget.store.timetableAppearance.clone(),
   };
   late final reminders = widget.store.document.reminders.clone();
   late final widgetDraft = widget.store.widgetAppearance.clone();
@@ -137,7 +139,7 @@ class _SettingsViewState extends State<SettingsView> {
   final dirtyProfiles = <String>{};
   bool remindersDirty = false, startupLoading = true;
   StartupSelection startup = const StartupSelection();
-  String get activeLayout => tab == 'calendar' ? 'calendar' : 'list';
+  String get activeLayout => drafts.containsKey(tab) ? tab : 'list';
   Appearance get draft => drafts[activeLayout]!;
   @override
   void initState() {
@@ -372,6 +374,7 @@ class _SettingsViewState extends State<SettingsView> {
               children: {
                 'list': const Text('清单'),
                 'calendar': const Text('月历'),
+                'timetable': const Text('课程表'),
                 'reminders': const Text('日程'),
                 if (android) 'widgets': const Text('组件'),
                 'account': const Text('账号'),
@@ -387,7 +390,20 @@ class _SettingsViewState extends State<SettingsView> {
               },
             ),
             const SizedBox(height: 18),
-            if (tab == 'list' || tab == 'calendar') ...[
+            if (tab == 'timetable')
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => showPanel<void>(
+                    context,
+                    '课表排版',
+                    CourseGridEditor(store: widget.store),
+                    width: 460,
+                  ),
+                  child: const Text('节次与排版'),
+                ),
+              ),
+            if (drafts.containsKey(tab)) ...[
               Row(
                 children: [
                   Tooltip(
@@ -568,7 +584,7 @@ class _SettingsViewState extends State<SettingsView> {
                 ]),
               ),
               section(
-                '日程颜色',
+                tab == 'timetable' ? '课程颜色套组' : '日程颜色',
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -641,7 +657,7 @@ class _SettingsViewState extends State<SettingsView> {
                           children: [
                             Expanded(
                               child: field(
-                                '分级',
+                                tab == 'timetable' ? '颜色名称' : '分级',
                                 level.name,
                                 (v) => change(() => level.name = v),
                                 id: '${levels.id}-${level.id}',
@@ -652,16 +668,16 @@ class _SettingsViewState extends State<SettingsView> {
                             swatch(
                               level.color,
                               (v) => change(() => level.color = v),
-                              '分级颜色',
+                              tab == 'timetable' ? '课程底色' : '分级颜色',
                             ),
                             swatch(
                               level.textColor ?? p.text,
                               (v) => change(() => level.textColor = v),
-                              '标签文字颜色',
+                              tab == 'timetable' ? '课程文字颜色' : '标签文字颜色',
                             ),
                             ActionIcon(
                               CupertinoIcons.minus_circle,
-                              '删除分级',
+                              tab == 'timetable' ? '删除颜色' : '删除分级',
                               levels.levels.length <= 1
                                   ? null
                                   : () => change(
@@ -686,7 +702,7 @@ class _SettingsViewState extends State<SettingsView> {
                                   ),
                                 ),
                               ),
-                        child: const Text('添加分级'),
+                        child: Text(tab == 'timetable' ? '添加颜色' : '添加分级'),
                       ),
                     ),
                   ],

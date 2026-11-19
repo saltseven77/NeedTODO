@@ -91,6 +91,91 @@ class AppStore extends ChangeNotifier {
   Document document = Document();
   Map<String, dynamic> _deviceSettings = {}, _sharedStyles = {};
   String get _settingsKey => '$_key-device-settings';
+  CourseGrid get courseGrid =>
+      CourseGrid.fromJson(object(_deviceSettings['courseGrid']));
+  Map<String, dynamic> get _courseColorMap {
+    final saved = object(_deviceSettings['courseColorMap']);
+    if (saved.isNotEmpty) return saved;
+    final result = <String, dynamic>{};
+    for (final c in document.courses) {
+      if (c.color != null) {
+        final key = '${c.color}:${c.textColor ?? 0xff64526c}';
+        result.putIfAbsent(key, () => 'course-${result.length % 8}');
+      }
+    }
+    return result;
+  }
+
+  String courseLevel(Course c) {
+    if (c.color != null) {
+      final key = '${c.color}:${c.textColor ?? 0xff64526c}';
+      return _courseColorMap[key] ?? 'course-0';
+    }
+    if (c.level.startsWith('course-') ||
+        timetableAppearance.levelSets.any(
+          (s) => s.levels.any((l) => l.id == c.level),
+        )) {
+      return c.level;
+    }
+    return 'course-${const ['normal', 'important', 'urgent'].indexOf(c.level).clamp(0, 2)}';
+  }
+
+  Appearance get timetableAppearance {
+    final a = _deviceSettings['timetable'] == null
+        ? (document.list.clone()..name = '课程表')
+        : Appearance.fromJson(object(_deviceSettings['timetable']));
+    if (a.levelSets.any(
+      (s) => s.levels.any((l) => l.id.startsWith('course-')),
+    )) {
+      return a;
+    }
+    const colors = [
+      0xffedc4d7,
+      0xffc9c0ef,
+      0xffa8d9eb,
+      0xffa9dfd7,
+      0xfff8dfa0,
+      0xfff2c3a4,
+      0xffe0d8f4,
+      0xffd3dfb0,
+    ];
+    final imported = _courseColorMap.keys
+        .take(8)
+        .map((key) => key.split(':').map(int.parse).toList())
+        .toList();
+    a.levelSets = [
+      for (final entry in const {
+        'mist': '柔彩',
+        'warm': '浅彩',
+        'gray': '素灰',
+      }.entries)
+        LevelSet(entry.key, entry.value, [
+          for (var i = 0; i < 8; i++)
+            Level(
+              'course-$i',
+              '颜色 ${i + 1}',
+              entry.key == 'gray'
+                  ? Color(0xffe7e8eb - i * 0x00020202)
+                  : Color(i < imported.length ? imported[i][0] : colors[i])
+                        .withValues(alpha: entry.key == 'warm' ? .55 : 1),
+              Color(i < imported.length ? imported[i][1] : 0xff64526c),
+            ),
+        ]),
+    ];
+    if (!a.levelSets.any((s) => s.id == a.levelSetId)) a.levelSetId = 'mist';
+    return a;
+  }
+
+  Future<void>? _preparingCourseColors;
+  Future<void> prepareCourseColors() => _preparingCourseColors ??= (() async {
+    if (_deviceSettings['courseColorMap'] != null) return;
+    final mapping = _courseColorMap;
+    await dispatch({
+      'type': 'preferences',
+      'profiles': {'timetable': timetableAppearance.toJson()},
+      'courseColorMap': mapping,
+    });
+  })().whenComplete(() => _preparingCourseColors = null);
   Appearance get widgetAppearance => _deviceSettings['widgets'] == null
       ? Appearance(
           radius: 12,
@@ -360,7 +445,9 @@ class AppStore extends ChangeNotifier {
           settingsOnly = true;
           final appearance = Appearance.fromJson(object(action['value']))
             ..updated = DateTime.now().toUtc();
-          if (action['layout'] == 'calendar') {
+          if (action['layout'] == 'timetable') {
+            settings['timetable'] = appearance.toJson();
+          } else if (action['layout'] == 'calendar') {
             next.calendar = appearance;
             settings['calendar'] = appearance.toJson();
           } else {
@@ -385,6 +472,14 @@ class AppStore extends ChangeNotifier {
             next.reminders = ReminderStyle.fromJson(object(action['reminders']))
               ..updated = DateTime.now().toUtc();
             settings['reminders'] = next.reminders.toJson();
+          }
+          if (action['courseColorMap'] != null) {
+            settings['courseColorMap'] = object(action['courseColorMap']);
+          }
+          if (action['courseGrid'] != null) {
+            settings['courseGrid'] = CourseGrid.fromJson(
+              object(action['courseGrid']),
+            ).toJson();
           }
           if (action['widgets'] != null) {
             settings['widgets'] = Appearance.fromJson(object(action['widgets']))

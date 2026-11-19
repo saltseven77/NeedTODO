@@ -359,9 +359,11 @@ class _CategoryProgressState extends State<_CategoryProgress> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    Flexible(
+                    Expanded(
                       child: Text(
-                        '$duration · ${widget.tasks.length} 项计划',
+                        duration,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           fontSize: 11,

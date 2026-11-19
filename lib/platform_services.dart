@@ -666,6 +666,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
 
   @override
   void onWindowMinimize() {
+    if (_editing) return;
     guard(() async {
       await windowManager.restore();
       if (calendar) {
@@ -772,7 +773,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
   }
 
   Future<void> collapse() async {
-    if (busy || collapsed) return;
+    if (busy || collapsed || _editing) return;
     if (maximized) {
       await windowManager.unmaximize();
       maximized = false;
@@ -885,6 +886,9 @@ class DesktopController extends ChangeNotifier with WindowListener {
 
   Future<void> editing(bool value) async {
     if (_editing == value) return;
+    if (value && (collapsed || docked != null)) {
+      await expand();
+    }
     _editing = value;
     // Top-level dialogs already have focus. Showing/focusing the native window
     // for every dialog creates unnecessary activation and redraw transitions.

@@ -332,10 +332,18 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   Future<void> _reminderDialogs = Future.value();
   DateTime today = dayOnly(DateTime.now());
   StreamSubscription<Uri>? links;
-  String get layout => calendar ? 'calendar' : 'list';
+  String get layout => calendar
+      ? 'calendar'
+      : timetable
+      ? 'timetable'
+      : 'list';
   Appearance get appearance =>
       preview ??
-      (calendar ? widget.store.document.calendar : widget.store.document.list);
+      (calendar
+          ? widget.store.document.calendar
+          : timetable
+          ? store.timetableAppearance
+          : widget.store.document.list);
   AppStore get store => widget.store;
   @override
   void initState() {
@@ -802,7 +810,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             pickDate: pickDate,
                           )
                         : timetable
-                        ? Timetable(store: store)
+                        ? Timetable(store: store, appearance: a, desktop: d)
                         : journal
                         ? JournalWorkspace(
                             store: store,

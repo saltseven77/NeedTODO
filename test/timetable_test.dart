@@ -90,7 +90,7 @@ void main() {
       await tester.tap(find.text('删除课程'));
       await tester.pumpAndSettle();
       expect(store.document.courses.single.deleted, true);
-      expect(find.text('还没有课程'), findsOneWidget);
+      expect(find.text('添加第一门课程'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await store.shutdown();

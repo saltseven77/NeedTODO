@@ -37,7 +37,7 @@ void main() {
   });
 
   testWidgets(
-    'month view reports planned duration and count including untimed tasks',
+    'month view reports only duration by category including untimed tasks',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -67,8 +67,9 @@ void main() {
       );
       expect(find.text('学习'), findsOneWidget);
       expect(find.text('未分类'), findsOneWidget);
-      expect(find.text('1 小时 30 分钟 · 2 项计划'), findsOneWidget);
-      expect(find.text('0 分钟 · 1 项计划'), findsOneWidget);
+      expect(find.text('1 小时 30 分钟'), findsOneWidget);
+      expect(find.text('0 分钟'), findsOneWidget);
+      expect(find.textContaining('项计划'), findsNothing);
       expect(find.text('完美打卡 1 天'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

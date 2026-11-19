@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:needtodo/app.dart';
 import 'package:needtodo/model.dart';
 import 'package:needtodo/course.dart';
+import 'package:needtodo/ui/components.dart';
 import 'package:needtodo/ui/timetable.dart';
 import 'package:needtodo/store.dart';
 import 'package:needtodo/platform_services.dart';
@@ -142,32 +143,84 @@ void main() {
     final now = DateTime.now();
     store.document.courses = [
       Course(
-        name: '计算机网络',
-        room: '教学楼 A302',
-        teacher: '王老师',
-        termStart: now,
-        weekday: now.weekday,
-        start: 540,
-        end: 630,
-      ),
-      Course(
         name: '高等数学',
-        room: '理科楼 B201',
-        teacher: '李老师',
+        room: '教学楼 A-301',
         termStart: now,
-        weekday: now.weekday,
-        start: 660,
-        end: 750,
-        level: 'important',
+        weekday: 1,
+        startPeriod: 1,
+        endPeriod: 2,
+        color: 0xfff5daec,
+        textColor: 0xff64526c,
       ),
       Course(
         name: '大学英语',
-        room: '外语楼 205',
+        room: '外语楼 B-205',
         termStart: now,
         weekday: 1,
-        start: 600,
-        end: 690,
-        level: 'urgent',
+        startPeriod: 3,
+        endPeriod: 4,
+        color: 0xfff5daec,
+        textColor: 0xff64526c,
+      ),
+      Course(
+        name: 'Python 程序设计',
+        room: '信息楼 机房2',
+        termStart: now,
+        weekday: 2,
+        startPeriod: 5,
+        endPeriod: 6,
+        color: 0xfff1c4df,
+        textColor: 0xff64526c,
+      ),
+      Course(
+        name: '电子电路实验',
+        room: '实训楼 实验室',
+        termStart: now,
+        weekday: 2,
+        startPeriod: 7,
+        endPeriod: 8,
+        color: 0xffe0d8f4,
+        textColor: 0xff64526c,
+      ),
+      Course(
+        name: '数据结构',
+        room: '教学楼 A-405',
+        termStart: now,
+        weekday: 3,
+        startPeriod: 1,
+        endPeriod: 2,
+        color: 0xfff1c4df,
+        textColor: 0xff64526c,
+      ),
+      Course(
+        name: '大学体育（篮球）',
+        room: '体育馆 篮球场',
+        termStart: now,
+        weekday: 3,
+        startPeriod: 5,
+        endPeriod: 6,
+        color: 0xffc3b2ed,
+        textColor: 0xff514668,
+      ),
+      Course(
+        name: '线性代数',
+        room: '教学楼 C-102',
+        termStart: now,
+        weekday: 4,
+        startPeriod: 3,
+        endPeriod: 4,
+        color: 0xffc3b2ed,
+        textColor: 0xff514668,
+      ),
+      Course(
+        name: '思想道德与法治',
+        room: '综合楼 阶梯1',
+        termStart: now,
+        weekday: 5,
+        startPeriod: 5,
+        endPeriod: 6,
+        color: 0xffe0d8f4,
+        textColor: 0xff64526c,
       ),
     ];
     for (final size in [const Size(390, 844), const Size(1100, 800)]) {
@@ -177,7 +230,7 @@ void main() {
           key: boundary,
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
-            theme: ThemeData(fontFamily: 'Segoe UI'),
+            theme: appTheme(),
             home: Scaffold(
               body: SafeArea(
                 child: Timetable(key: UniqueKey(), store: store),
@@ -188,6 +241,35 @@ void main() {
       );
       await shot(size.width < 760 ? 'timetable-phone' : 'timetable-desktop');
     }
+    tester.view.physicalSize = const Size(480, 860);
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: appTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showPanel<void>(
+                  context,
+                  '编辑课程',
+                  CourseEditor(
+                    store: store,
+                    initial: store.document.courses.first,
+                    date: now,
+                  ),
+                  width: 420,
+                ),
+                child: const Text('打开课程编辑'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开课程编辑'));
+    await shot('course-editor');
     tester.view.physicalSize = const Size(380, 330);
     final noteDesktop = DesktopController(MemoryStorage(), calendar: false)
       ..collapsed = true
@@ -197,7 +279,7 @@ void main() {
         key: boundary,
         child: MaterialApp(
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(fontFamily: 'Segoe UI'),
+          theme: appTheme(),
           home: FloatingNote(
             desktop: noteDesktop,
             appearance: store.document.list,
