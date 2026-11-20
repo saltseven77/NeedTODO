@@ -91,6 +91,45 @@ class AppStore extends ChangeNotifier {
   Document document = Document();
   Map<String, dynamic> _deviceSettings = {}, _sharedStyles = {};
   String get _settingsKey => '$_key-device-settings';
+  List<Todo> scheduleBetween(DateTime from, DateTime until) => courseSchedule(
+    document,
+    from,
+    until,
+    grid: courseGrid,
+    appearance: timetableAppearance,
+    levelFor: courseLevel,
+  );
+  List<Todo> schedule(String scope, DateTime date) {
+    final start = scope == 'month'
+        ? DateTime(date.year, date.month)
+        : scope == 'week'
+        ? dayOnly(date).subtract(Duration(days: date.weekday - 1))
+        : dayOnly(date);
+    final end = scope == 'month'
+        ? DateTime(date.year, date.month + 1)
+        : DateTime(
+            start.year,
+            start.month,
+            start.day + (scope == 'week' ? 7 : 1),
+          );
+    return tasksForPeriod(scheduleBetween(start, end), scope, date);
+  }
+
+  List<Todo> calendarSchedule(DateTime date) {
+    final start = DateTime(date.year, date.month);
+    final monday = start.subtract(Duration(days: start.weekday - 1));
+    return scheduleBetween(monday, monday.add(const Duration(days: 42)));
+  }
+
+  Document serviceDocument() {
+    final now = DateTime.now();
+    return document.clone()
+      ..tasks = scheduleBetween(
+        DateTime(now.year, now.month - 1),
+        DateTime(now.year, now.month + 2),
+      );
+  }
+
   CourseGrid get courseGrid =>
       CourseGrid.fromJson(object(_deviceSettings['courseGrid']));
   Map<String, dynamic> get _courseColorMap {
@@ -127,6 +166,16 @@ class AppStore extends ChangeNotifier {
     if (a.levelSets.any(
       (s) => s.levels.any((l) => l.id.startsWith('course-')),
     )) {
+      for (final set in a.levelSets.where(
+        (s) => s.id == 'mist' || s.id == 'warm',
+      )) {
+        for (final level in set.levels) {
+          if ((level.color.toARGB32() & 0x00ffffff) == 0x00e0d8f4) {
+            level.color = const Color(0xffe4c49e)
+                .withValues(alpha: level.color.a);
+          }
+        }
+      }
       return a;
     }
     const colors = [
@@ -136,7 +185,7 @@ class AppStore extends ChangeNotifier {
       0xffa9dfd7,
       0xfff8dfa0,
       0xfff2c3a4,
-      0xffe0d8f4,
+      0xffe4c49e,
       0xffd3dfb0,
     ];
     final imported = _courseColorMap.keys
@@ -425,13 +474,36 @@ class AppStore extends ChangeNotifier {
             updated: DateTime.now().toUtc(),
           );
         case 'toggleTask':
-          final index = next.tasks.indexWhere(
-            (t) => t.id == action['id'] && !t.deleted,
-          );
-          if (index >= 0) {
-            next.tasks[index] = next.tasks[index].copy(
-              done: !next.tasks[index].done,
+          final occurrence = object(action['occurrence']);
+          final date = DateTime.tryParse(occurrence['date'] ?? '');
+          if ((action['id'] as String).startsWith('course:') && date != null) {
+            final task = courseSchedule(
+              next,
+              date,
+              DateTime(date.year, date.month, date.day + 1),
+            ).where((t) => t.id == action['id']).firstOrNull;
+            if (task != null) {
+              next.tasks.removeWhere((t) => t.id == task.id);
+              next.tasks.add(
+                Todo(
+                  id: task.id,
+                  courseId: task.courseId,
+                  title: task.title,
+                  date: task.date,
+                  category: '课程',
+                  done: !task.done,
+                ),
+              );
+            }
+          } else {
+            final index = next.tasks.indexWhere(
+              (t) => t.id == action['id'] && !t.deleted,
             );
+            if (index >= 0) {
+              next.tasks[index] = next.tasks[index].copy(
+                done: !next.tasks[index].done,
+              );
+            }
           }
         case 'task':
           final task = Todo.fromJson(object(action['task']));
@@ -507,8 +579,11 @@ class AppStore extends ChangeNotifier {
     return op;
   }
 
-  Future<void> toggleTask(Todo task) =>
-      dispatch({'type': 'toggleTask', 'id': task.id});
+  Future<void> toggleTask(Todo task) => dispatch({
+    'type': 'toggleTask',
+    'id': task.id,
+    'occurrence': {'date': task.date},
+  });
 
   Future<void> saveTask(Todo task) =>
       dispatch({'type': 'task', 'task': task.toJson()});
@@ -858,6 +933,9 @@ class AppStore extends ChangeNotifier {
   int remoteOpenSignal = 0;
   Map<String, dynamic> get snapshot => {
     'document': document.toJson(),
+    'courseGrid': courseGrid.toJson(),
+    'courseAppearance': timetableAppearance.toJson(),
+    'courseColorMap': _courseColorMap,
     'local': local,
     'account': account,
     'signal': calendarOpenSignal,
@@ -909,6 +987,9 @@ class AppStore extends ChangeNotifier {
     if (!changed && signal == remoteOpenSignal && !recovered) return;
     if (changed) {
       document = Document.fromJson(object(snapshot['document']));
+      _deviceSettings['courseGrid'] = snapshot['courseGrid'];
+      _deviceSettings['timetable'] = snapshot['courseAppearance'];
+      _deviceSettings['courseColorMap'] = snapshot['courseColorMap'];
       local = snapshot['local'] == true;
       account = snapshot['account'] == null
           ? null

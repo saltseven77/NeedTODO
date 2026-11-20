@@ -115,7 +115,7 @@ Future<void> main(List<String> args) async {
     store.onDocumentChanged = () {
       services
           ?.publish(
-            store.entered ? store.document : Document(),
+            store.entered ? store.serviceDocument() : Document(),
             widgetAppearance: store.widgetAppearance,
           )
           .then((_) => store.clearNotificationError())

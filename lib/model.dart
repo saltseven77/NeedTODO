@@ -1,4 +1,7 @@
 import 'dart:math';
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 
 import 'course.dart';
 
@@ -39,6 +42,8 @@ class Todo {
   final int? startMinute, endMinute;
   final String timePeriod;
   final DateTime? reminder;
+  final String? courseId;
+  final Color? courseColor, courseText;
   Todo({
     String? id,
     required this.title,
@@ -50,6 +55,9 @@ class Todo {
     this.deleted = false,
     DateTime? updated,
     this.reminder,
+    this.courseId,
+    this.courseColor,
+    this.courseText,
     DateTime? created,
     this.startMinute,
     this.endMinute,
@@ -57,6 +65,8 @@ class Todo {
   }) : id = id ?? newId(),
        created = created ?? DateTime.now().toUtc(),
        updated = updated ?? DateTime.now().toUtc();
+  Color background(Appearance a) => courseColor ?? a.taskColor(level);
+  Color ink(Appearance a) => courseText ?? a.taskTextColor(level);
   Todo copy({
     String? title,
     String? date,
@@ -73,6 +83,9 @@ class Todo {
     bool clearReminder = false,
   }) => Todo(
     id: id,
+    courseId: courseId,
+    courseColor: courseColor,
+    courseText: courseText,
     title: title ?? this.title,
     date: date ?? this.date,
     scope: scope ?? this.scope,
@@ -90,6 +103,7 @@ class Todo {
       ? {'id': id, 'deleted': true, 'updated': updated.toIso8601String()}
       : {
           'id': id,
+          if (courseId != null) 'courseId': courseId,
           'title': title,
           'date': date,
           'scope': scope,
@@ -109,6 +123,7 @@ class Todo {
     if (DateTime.tryParse(date) == null) throw const FormatException('日期无效');
     return Todo(
       id: j['id'],
+      courseId: j['courseId'] is String ? j['courseId'] : null,
       title: j['title'] ?? '',
       date: date,
       scope: ['day', 'week', 'month'].contains(j['scope']) ? j['scope'] : 'day',
@@ -438,6 +453,62 @@ List<Todo> tasksForPeriod(List<Todo> tasks, String scope, DateTime date) {
             t.date.compareTo(dayKey(end)) < 0,
       )
       .toList();
+}
+
+String courseTaskId(String id, String date) =>
+    'course:${sha256.convert(utf8.encode('$id|$date'))}';
+List<Todo> courseSchedule(
+  Document doc,
+  DateTime from,
+  DateTime until, {
+  CourseGrid? grid,
+  Appearance? appearance,
+  String Function(Course)? levelFor,
+}) {
+  final marks = {
+    for (final t in doc.tasks)
+      if (t.id.startsWith('course:')) t.id: t,
+  };
+  final result = doc.tasks
+      .where((t) => !t.id.startsWith('course:') && t.courseId == null)
+      .toList();
+  for (final c in doc.courses.where((c) => !c.deleted)) {
+    for (
+      var date = dayOnly(from);
+      date.isBefore(until);
+      date = DateTime(date.year, date.month, date.day + 1)
+    ) {
+      if (!c.occursOn(date)) continue;
+      final key = dayKey(date),
+          id = courseTaskId(c.id, key),
+          state = marks[courseTaskId(c.id, key)];
+      var start = c.start, end = c.end;
+      if (grid != null && c.startPeriod != null && c.endPeriod != null) {
+        final span = grid.span(c);
+        start = grid.slots[span.$1].start;
+        end = grid.slots[span.$2].end;
+      }
+      final level = levelFor?.call(c) ?? c.level;
+      result.add(
+        Todo(
+          id: id,
+          courseId: c.id,
+          title: c.name,
+          date: key,
+          category: '课程',
+          level: level,
+          startMinute: start,
+          endMinute: end,
+          done: state?.done ?? false,
+          created: c.updated,
+          updated: c.updated,
+          courseColor: appearance?.taskColor(level),
+          courseText: appearance?.taskTextColor(level),
+        ),
+      );
+    }
+  }
+  return result;
 }
 
 String minuteLabel(int minute) =>

@@ -362,7 +362,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       widget.services?.onOpenTask = (id) {
-        final matches = store.document.tasks.where(
+        final matches = store.serviceDocument().tasks.where(
           (task) => task.id == id && !task.deleted,
         );
         if (matches.isEmpty || !mounted) return;
@@ -473,7 +473,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       run(() async {
         await widget.services?.publish(
-          store.document,
+          store.serviceDocument(),
           widgetAppearance: store.widgetAppearance,
         );
       });
@@ -544,6 +544,31 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
   }
 
   Future<void> edit([Todo? task, DateTime? date]) async {
+    if (task?.courseId != null) {
+      final course = store.document.courses
+          .where((c) => c.id == task!.courseId && !c.deleted)
+          .firstOrNull;
+      if (course == null) return;
+      await widget.desktop?.editing(true);
+      if (!mounted) return;
+      try {
+        await showPanel<void>(
+          context,
+          '编辑课程',
+          CourseEditor(
+            store: store,
+            initial: course,
+            date: DateTime.parse(task!.date),
+            appearance: store.timetableAppearance,
+          ),
+          width: 460,
+        );
+      } finally {
+        await widget.desktop?.editing(false);
+      }
+      return;
+    }
+
     final fromQuick = task == null && date == null && !calendar;
     final draftText = fromQuick ? quick.text : '';
     await run(() async {
@@ -636,7 +661,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
       return FloatingNote(
         desktop: d!,
         appearance: store.document.list,
-        tasks: tasksForPeriod(store.document.tasks, 'day', today),
+        tasks: store.schedule('day', today),
         open: () => run(d.expand),
         menu: () => run(() => native.invokeMethod('trayMenu')),
       );
@@ -794,7 +819,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                             appearance: a,
                             calendarDays: holidayCalendar.days,
                             selected: selected,
-                            tasks: store.document.tasks,
+                            tasks: store.calendarSchedule(selected),
                             wide: wide,
                             showAgenda: showAgenda,
                             toggleAgenda: () =>
@@ -1058,7 +1083,10 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                             key: ValueKey(
                                               'month-${selected.year}-${selected.month}',
                                             ),
-                                            tasks: store.document.tasks,
+                                            tasks: store.schedule(
+                                              'month',
+                                              selected,
+                                            ),
                                             appearance: a,
                                             month: selected,
                                             today: today,
@@ -1069,8 +1097,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                         : scope == 'day' && timeline
                                         ? DayTimeline(
                                             selectedDate: selected,
-                                            tasks: tasksForPeriod(
-                                              store.document.tasks,
+                                            tasks: store.schedule(
                                               scope,
                                               selected,
                                             ),
@@ -1082,8 +1109,7 @@ class _WorkspaceState extends State<Workspace> with WidgetsBindingObserver {
                                         : TaskList(
                                             showCounts: d != null,
                                             showDates: scope != 'day',
-                                            tasks: tasksForPeriod(
-                                              store.document.tasks,
+                                            tasks: store.schedule(
                                               scope,
                                               selected,
                                             ),
@@ -1310,7 +1336,7 @@ class TaskList extends StatelessWidget {
                           ),
                         Container(
                           decoration: BoxDecoration(
-                            color: appearance.taskColor(t.level),
+                            color: t.background(appearance),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -1340,8 +1366,8 @@ class TaskList extends StatelessWidget {
                                         Text(
                                           t.title,
                                           style: TextStyle(
-                                            color: appearance
-                                                .taskTextColor(t.level)
+                                            color: t
+                                                .ink(appearance)
                                                 .withValues(
                                                   alpha:
                                                       appearance
@@ -1374,8 +1400,8 @@ class TaskList extends StatelessWidget {
                                             taskTimeLabel(t),
                                             style: TextStyle(
                                               fontSize: 11,
-                                              color: appearance
-                                                  .taskTextColor(t.level)
+                                              color: t
+                                                  .ink(appearance)
                                                   .withValues(
                                                     alpha:
                                                         appearance
@@ -1437,7 +1463,7 @@ class CalendarTask extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.fromLTRB(3, 3, 3, 0),
     decoration: BoxDecoration(
-      color: appearance.taskColor(task.level),
+      color: task.background(appearance),
       borderRadius: BorderRadius.circular(5),
     ),
     child: Row(
@@ -1469,12 +1495,10 @@ class CalendarTask extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
-                  color: appearance
-                      .taskTextColor(task.level)
+                  color: task
+                      .ink(appearance)
                       .withValues(
-                        alpha:
-                            appearance.taskTextColor(task.level).a *
-                            (task.done ? .45 : 1),
+                        alpha: task.ink(appearance).a * (task.done ? .45 : 1),
                       ),
                   decoration: task.done ? TextDecoration.lineThrough : null,
                 ),

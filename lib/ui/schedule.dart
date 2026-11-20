@@ -132,7 +132,7 @@ class _DayTimelineState extends State<DayTimeline> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
-                color: appearance.taskTextColor(t.level),
+                color: t.ink(appearance),
                 decoration: t.done ? TextDecoration.lineThrough : null,
               ),
             ),
@@ -196,9 +196,7 @@ class _DayTimelineState extends State<DayTimeline> {
                   border: Border(
                     left: BorderSide(
                       width: 3,
-                      color: appearance
-                          .taskColor(task.level)
-                          .withValues(alpha: 1),
+                      color: task.background(appearance).withValues(alpha: 1),
                     ),
                   ),
                 ),
@@ -256,7 +254,7 @@ class _DayTimelineState extends State<DayTimeline> {
                           key: ValueKey('timeline-event-${e.task.id}'),
                           clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
-                            color: appearance.taskColor(e.task.level),
+                            color: e.task.background(appearance),
                             borderRadius: BorderRadius.circular(5),
                           ),
                           child: Stack(
@@ -271,8 +269,8 @@ class _DayTimelineState extends State<DayTimeline> {
                                 width: 4,
                                 child: DecoratedBox(
                                   decoration: BoxDecoration(
-                                    color: appearance
-                                        .taskColor(e.task.level)
+                                    color: e.task
+                                        .background(appearance)
                                         .withValues(
                                           alpha: e.task.done ? .4 : 1,
                                         ),
@@ -315,8 +313,8 @@ class _DayTimelineState extends State<DayTimeline> {
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 10,
-                                            color: appearance
-                                                .taskTextColor(e.task.level)
+                                            color: e.task
+                                                .ink(appearance)
                                                 .withValues(
                                                   alpha:
                                                       appearance
