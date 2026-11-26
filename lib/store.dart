@@ -11,6 +11,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'model.dart';
 import 'course.dart';
+import 'platform_services.dart' show native;
+
+import 'package:flutter/services.dart' show MissingPluginException;
+
 import 'storage.dart';
 
 Document mergeDocuments(Document local, Document remote) {
@@ -909,8 +913,24 @@ class AppStore extends ChangeNotifier {
     _openingCalendar = true;
     try {
       if (_calendar != null) {
-        calendarOpenSignal++;
-        return;
+        bool alive = true;
+        try {
+          alive =
+              await native.invokeMethod<bool>(
+                'calendarAlive',
+                _calendar!.pid,
+              ) ??
+              true;
+        } on MissingPluginException {
+          /* Compatible with older runners. */
+        }
+        if (alive) {
+          calendarOpenSignal++;
+          return;
+        }
+        final stale = _calendar!;
+        _calendar = null;
+        stale.kill();
       }
       _ipc ??= await HttpServer.bind(InternetAddress.loopbackIPv4, 0)
         ..listen(_handlePeer);
@@ -921,8 +941,9 @@ class AppStore extends ChangeNotifier {
       ]);
       _calendar!.stdout.drain<void>();
       _calendar!.stderr.drain<void>();
-      _calendar!.exitCode.then((_) {
-        _calendar = null;
+      final launched = _calendar!;
+      launched.exitCode.then((_) {
+        if (identical(_calendar, launched)) _calendar = null;
       });
     } finally {
       _openingCalendar = false;

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -594,6 +595,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
     );
     await windowManager.setPreventClose(true);
     await windowManager.setResizable(!locked);
+    native.setMethodCallHandler(_handleNativeCall);
     windowManager.addListener(this);
     if (showWindow) await windowManager.show();
   }
@@ -633,20 +635,38 @@ class DesktopController extends ChangeNotifier with WindowListener {
   @override
   void onWindowUnmaximize() {
     maximized = false;
+    guard(refreshLayout);
     notifyListeners();
+  }
+
+  Future<void> refreshLayout() async {
+    try {
+      await native.invokeMethod('refreshLayout');
+    } on MissingPluginException {
+      /* Older runners need a full update. */
+    }
   }
 
   Future<void> toggleMaximize() async {
     if (busy || collapsed || locked) return;
-    if (maximized) {
-      await windowManager.unmaximize();
-      maximized = false;
-    } else {
-      await saveNow();
-      await windowManager.maximize();
-      maximized = true;
+    if (!maximized) await saveNow();
+    busy = true;
+    _saveTimer?.cancel();
+    try {
+      if (maximized) {
+        await windowManager.unmaximize();
+        if (expanded != null) await windowManager.setBounds(expanded!);
+        maximized = false;
+      } else {
+        await windowManager.maximize();
+        maximized = true;
+      }
+      notifyListeners();
+      await refreshLayout();
+    } finally {
+      busy = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   @override
@@ -665,9 +685,18 @@ class DesktopController extends ChangeNotifier with WindowListener {
   }
 
   @override
+  void onWindowFocus() {
+    if (collapsed && !busy) guard(expand);
+  }
+
+  @override
   void onWindowMinimize() {
     if (_editing) return;
     guard(() async {
+      if (collapsed) {
+        await expand();
+        return;
+      }
       await windowManager.restore();
       if (calendar) {
         await hideCalendar();
@@ -775,8 +804,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
   Future<void> collapse() async {
     if (busy || collapsed || _editing) return;
     if (maximized) {
-      await windowManager.unmaximize();
-      maximized = false;
+      await toggleMaximize();
     }
     busy = true;
     try {
@@ -825,6 +853,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
       await persist();
       notifyListeners();
       if (embedded) await native.invokeMethod('embed', true);
+      await refreshLayout();
     } finally {
       busy = false;
     }
@@ -865,7 +894,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
     final previous = embedded, previousLock = locked;
     try {
       // Reconfigure only while top-level. Reparenting an open editor steals IME focus.
-      await native.invokeMethod('embed', false);
+      if (!value && embedded) await native.invokeMethod('embed', false);
       await windowManager.setResizable(!value);
       await windowManager.setAlwaysOnTop(false);
       if (!_editing && value) await native.invokeMethod('embed', true);
@@ -874,10 +903,21 @@ class DesktopController extends ChangeNotifier with WindowListener {
       await persist();
       notifyListeners();
     } catch (_) {
-      embedded = previous;
-      locked = previousLock;
-      await windowManager.setResizable(!previousLock);
-      if (!_editing && previous) await native.invokeMethod('embed', true);
+      // Failed attachment must leave a usable ordinary window, not retry the same bad host.
+      if (value) {
+        embedded = false;
+        locked = false;
+        await native.invokeMethod('embed', false);
+        await windowManager.setResizable(true);
+        await windowManager.show();
+        await refreshLayout();
+        await persist();
+        notifyListeners();
+      } else {
+        embedded = previous;
+        locked = previousLock;
+        await windowManager.setResizable(!previousLock);
+      }
       rethrow;
     } finally {
       busy = false;
@@ -983,26 +1023,47 @@ class DesktopController extends ChangeNotifier with WindowListener {
     await persist();
   }
 
+  Future<void> recoverDesktopEmbedding() async {
+    embedded = false;
+    locked = false;
+    await native.invokeMethod('embed', false);
+    await windowManager.setResizable(true);
+    await windowManager.show();
+    await refreshLayout();
+    await persist();
+    notifyListeners();
+    onError?.call('桌面嵌入暂不可用，月历已恢复为普通窗口');
+  }
+
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (call.method == 'primaryActivated') {
+      if (collapsed && !busy) guard(expand);
+      return;
+    }
+    if (call.method == 'desktopEmbedFailed') {
+      guard(recoverDesktopEmbedding);
+      return;
+    }
+    if (call.method != 'trayAction') return;
+    guard(() async {
+      switch (call.arguments) {
+        case 1:
+          await expand();
+        case 2:
+          await onOpenCalendar?.call();
+        case 3:
+          await windowManager.show();
+          if (!collapsed) await collapse();
+        case 4:
+          await quit();
+        case 5:
+          await hideToTray();
+      }
+    });
+  }
+
   Future<void> initializeTray() async {
     if (calendar) return;
-    native.setMethodCallHandler((call) async {
-      if (call.method != 'trayAction') return;
-      guard(() async {
-        switch (call.arguments) {
-          case 1:
-            await expand();
-          case 2:
-            await onOpenCalendar?.call();
-          case 3:
-            await windowManager.show();
-            if (!collapsed) await collapse();
-          case 4:
-            await quit();
-          case 5:
-            await hideToTray();
-        }
-      });
-    });
     await native.invokeMethod('trayEnable', true);
     trayReady = true;
   }

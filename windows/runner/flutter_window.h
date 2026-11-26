@@ -37,6 +37,10 @@ class FlutterWindow : public Win32Window {
   LONG_PTR original_ex_style_ = 0;
   RECT desktop_bounds_{};
   bool embedding_transition_ = false;
+  bool first_frame_presented_ = false;
+  bool pending_embed_ = false;
+  void RefreshContent();
+  static constexpr UINT kEmbedAfterFrame = WM_APP + 43;
   bool SetDesktopEmbedded(bool enabled);
   bool tray_enabled_ = false;
   UINT taskbar_created_ = 0;

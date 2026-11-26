@@ -29,13 +29,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!calendar) {
     singleton = CreateMutexW(nullptr, FALSE, L"Local\\NeedTODO.Flutter.Main");
     if (singleton && GetLastError() == ERROR_ALREADY_EXISTS) {
-      EnumWindows([](HWND hwnd, LPARAM) -> BOOL {
-        if (GetPropW(hwnd, L"NeedTODO.Primary")) {
-          PostMessage(hwnd, FlutterWindow::kRestoreMessage, 0, 0);
-          return FALSE;
+      HWND existing = nullptr;
+      for (int retry = 0; retry < 30 && !existing; ++retry) {
+        EnumWindows([](HWND hwnd, LPARAM value) -> BOOL {
+          if (GetPropW(hwnd, L"NeedTODO.Primary")) { *reinterpret_cast<HWND*>(value)=hwnd; return FALSE; }
+          return TRUE;
+        }, reinterpret_cast<LPARAM>(&existing));
+        if (!existing) Sleep(100);
+      }
+      if (existing) {
+        DWORD owner=0; GetWindowThreadProcessId(existing, &owner); AllowSetForegroundWindow(owner);
+        ShowWindowAsync(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(existing);
+        PostMessage(existing, FlutterWindow::kRestoreMessage, 0, 0);
+        DWORD_PTR response=0;
+        if (!SendMessageTimeout(existing,WM_NULL,0,0,SMTO_ABORTIFHUNG,1500,&response)) {
+          MessageBox(nullptr,L"泥土豆当前暂未响应。请稍候；若持续如此，可在任务管理器中结束泥土豆后重新打开。",L"泥土豆",MB_OK|MB_ICONINFORMATION);
         }
-        return TRUE;
-      }, 0);
+      } else {
+        MessageBox(nullptr,L"检测到泥土豆正在启动或已有进程失去窗口。请稍候重试；若持续如此，可在任务管理器中结束泥土豆后重新打开。",L"泥土豆",MB_OK|MB_ICONINFORMATION);
+      }
       CloseHandle(singleton);
       CoUninitialize();
       return EXIT_SUCCESS;

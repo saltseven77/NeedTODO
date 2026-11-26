@@ -103,10 +103,24 @@ Future<void> main(List<String> args) async {
         }
       }
     }
+    runApp(
+      MaterialApp(
+        theme: appTheme(),
+        home: const Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      ),
+    );
     if (!secondary) {
       services = PlatformServices(dataDirectory: directory);
       try {
-        await services.initialize();
+        await services.initialize().timeout(const Duration(seconds: 12));
       } catch (e, stack) {
         unawaited(log(e, stack));
         store.error = '提醒暂不可用，请检查系统通知权限';
