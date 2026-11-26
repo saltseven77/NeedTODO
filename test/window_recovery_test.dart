@@ -4,6 +4,12 @@ import 'package:needtodo/platform_services.dart';
 
 import 'memory_storage.dart';
 
+class RestoreDesktop extends DesktopController {
+  RestoreDesktop() : super(MemoryStorage(), calendar: false);
+  @override
+  Future<Rect> clamp(Rect r) async => r;
+}
+
 class WakeDesktop extends DesktopController {
   int expansions = 0;
   WakeDesktop() : super(MemoryStorage(), calendar: false);
@@ -16,6 +22,35 @@ class WakeDesktop extends DesktopController {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'reopening a hidden maximized window restores native state before bounds',
+    () async {
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('window_manager'),
+        (c) async {
+          calls.add(c.method);
+          return c.method.startsWith('is') ? false : null;
+        },
+      );
+      messenger.setMockMethodCallHandler(native, (c) async => null);
+      final controller = RestoreDesktop()
+        ..expanded = const Rect.fromLTWH(40, 50, 430, 700)
+        ..maximized = true;
+      await controller.expand();
+      expect(calls.indexOf('unmaximize'), lessThan(calls.indexOf('setBounds')));
+      expect(controller.maximized, false);
+      controller.dispose();
+      messenger.setMockMethodCallHandler(native, null);
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('window_manager'),
+        null,
+      );
+    },
+  );
+
   test(
     'taskbar focus and minimized floating ball expand the main interface',
     () async {

@@ -302,6 +302,7 @@ class AppStore extends ChangeNotifier {
   Timer? _timer;
   HttpServer? _ipc;
   Process? _calendar;
+  Stopwatch? _calendarStartup;
   bool _openingCalendar = false;
   final String _ipcToken = base64UrlEncode(
     List.generate(32, (_) => Random.secure().nextInt(256)),
@@ -924,7 +925,7 @@ class AppStore extends ChangeNotifier {
         } on MissingPluginException {
           /* Compatible with older runners. */
         }
-        if (alive) {
+        if (alive || (_calendarStartup?.elapsed ?? const Duration(seconds: 10)) < const Duration(seconds: 10)) {
           calendarOpenSignal++;
           return;
         }
@@ -939,6 +940,7 @@ class AppStore extends ChangeNotifier {
         '${_ipc!.port}',
         _ipcToken,
       ]);
+      _calendarStartup = Stopwatch()..start();
       _calendar!.stdout.drain<void>();
       _calendar!.stderr.drain<void>();
       final launched = _calendar!;

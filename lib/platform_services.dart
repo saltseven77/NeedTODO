@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -839,6 +838,13 @@ class DesktopController extends ChangeNotifier with WindowListener {
         await windowManager.setSkipTaskbar(false);
       }
       if (embedded) await native.invokeMethod('embed', false);
+      if (await windowManager.isFullScreen()) {
+        await windowManager.setFullScreen(false);
+      }
+      if (maximized || await windowManager.isMaximized()) {
+        await windowManager.unmaximize();
+      }
+      maximized = false;
       if (collapsed) ball = await windowManager.getBounds();
       collapsed = false;
       docked = null;
