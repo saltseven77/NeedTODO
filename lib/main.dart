@@ -15,6 +15,7 @@ import 'ui/components.dart';
 import 'ui/reminder_popup.dart';
 import 'updates.dart';
 import 'ui/update_preferences.dart';
+import 'ui/hover_note_window.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +53,16 @@ Future<void> main(List<String> args) async {
     return true;
   };
   if (Platform.isWindows &&
+      args.length == 4 &&
+      args[0] == '--calendar' &&
+      args[3] == '--hover-note') {
+    await runHoverNoteWindow(
+      Uri.parse('http://127.0.0.1:${int.parse(args[1])}/hover-note'),
+      args[2],
+    );
+    return;
+  }
+  if (Platform.isWindows &&
       args.length == 3 &&
       args[0] == '--calendar' &&
       args[1] == '--reminder') {
@@ -82,6 +93,7 @@ Future<void> main(List<String> args) async {
       desktop = DesktopController(storage, calendar: secondary);
       await desktop.initialize(showWindow: !calendarOnly);
       desktop.onError = store.setError;
+      if (!secondary) desktop.onHoverNote = store.showHoverNote;
       desktop.onClose = () async {
         await store.shutdown();
         closeDesktopReminders();

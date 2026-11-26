@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show min, max;
+
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -495,22 +497,56 @@ class PlatformServices {
   }
 }
 
-Rect floatingNoteBounds(Rect anchor, Rect workArea) {
-  final left = anchor.left + 380 <= workArea.right
-      ? anchor.left
-      : anchor.right - 380;
-  return Rect.fromLTWH(
-    left.clamp(workArea.left, workArea.right - 380).toDouble(),
-    anchor.top.clamp(workArea.top, workArea.bottom - 330).toDouble(),
-    380,
-    330,
+bool minimizedPlaceholder(Rect r) =>
+    r.left < -10000 && r.top < -10000 && r.height < 40;
+
+class FloatingNoteLayout {
+  final Rect bounds, note;
+  final Offset ballOffset;
+  const FloatingNoteLayout(this.bounds, this.note, this.ballOffset);
+}
+
+FloatingNoteLayout floatingNoteLayout(Rect anchor, Rect workArea) {
+  const gap = 12.0, pad = 8.0;
+  final width = min(288.0, max(1.0, workArea.width - 2 * pad));
+  final height = min(304.0, max(1.0, workArea.height - 2 * pad));
+  var left = (anchor.left + 34 - width / 2)
+      .clamp(workArea.left + pad, workArea.right - pad - width)
+      .toDouble();
+  double top;
+  if (anchor.top - gap - height >= workArea.top + pad) {
+    top = anchor.top - gap - height;
+  } else if (anchor.bottom + gap + height <= workArea.bottom - pad) {
+    top = anchor.bottom + gap;
+  } else {
+    left = anchor.left - gap - width >= workArea.left + pad
+        ? anchor.left - gap - width
+        : anchor.right + gap;
+    left = left
+        .clamp(workArea.left + pad, workArea.right - pad - width)
+        .toDouble();
+    top = anchor.top
+        .clamp(workArea.top + pad, workArea.bottom - pad - height)
+        .toDouble();
+  }
+  final panel = Rect.fromLTWH(left, top, width, height);
+  final bounds = anchor.expandToInclude(panel.inflate(pad));
+  return FloatingNoteLayout(
+    bounds,
+    panel.shift(-bounds.topLeft),
+    anchor.topLeft - bounds.topLeft,
   );
 }
+
+Rect floatingNoteBounds(Rect anchor, Rect workArea) =>
+    floatingNoteLayout(anchor, workArea).bounds;
 
 class DesktopController extends ChangeNotifier with WindowListener {
   final JsonStorage storage;
   final bool calendar;
   Rect? expanded, ball;
+  Rect? _normalBeforeCollapse;
+  int _geometryEpoch = 0;
   bool collapsed = false,
       locked = false,
       embedded = false,
@@ -529,12 +565,13 @@ class DesktopController extends ChangeNotifier with WindowListener {
   Rect? _rect(dynamic v) {
     final j = object(v);
     if (j.isEmpty) return null;
-    return Rect.fromLTWH(
+    final rect = Rect.fromLTWH(
       number(j['x'], 40, -40000, 40000),
       number(j['y'], 40, -40000, 40000),
       number(j['w'], 420, 32, 16000),
       number(j['h'], 700, 32, 16000),
     );
+    return minimizedPlaceholder(rect) ? null : rect;
   }
 
   Map<String, double>? _json(Rect? r) =>
@@ -626,6 +663,20 @@ class DesktopController extends ChangeNotifier with WindowListener {
   @override
   void onWindowResize() => _changed();
   @override
+  void onWindowMoved() {
+    if (busy || noteVisible) return;
+    _saveTimer?.cancel();
+    guard(saveNow);
+  }
+
+  @override
+  void onWindowResized() {
+    if (busy || noteVisible) return;
+    _saveTimer?.cancel();
+    guard(saveNow);
+  }
+
+  @override
   void onWindowMaximize() {
     maximized = true;
     notifyListeners();
@@ -685,22 +736,27 @@ class DesktopController extends ChangeNotifier with WindowListener {
 
   @override
   void onWindowFocus() {
-    if (collapsed && !busy) guard(expand);
+    // Generic focus can be returned by the hover popup. Only native activation intent may wake the list.
+  }
+
+  Future<void> wakeFromFocus() async {
+    if (!collapsed || busy) return;
+    if (noteVisible && await pointerOverBallNote() == true) return;
+    if (collapsed && !busy) await expand();
   }
 
   @override
   void onWindowMinimize() {
-    if (_editing) return;
+    if (_editing || busy) return;
     guard(() async {
       if (collapsed) {
         await expand();
         return;
       }
-      await windowManager.restore();
       if (calendar) {
         await hideCalendar();
       } else {
-        await collapse();
+        await collapse(captureBounds: false);
       }
     });
   }
@@ -721,11 +777,25 @@ class DesktopController extends ChangeNotifier with WindowListener {
 
   Future<void> saveNow() async {
     if (busy || maximized || noteVisible) return;
+    final epoch = _geometryEpoch, wasCollapsed = collapsed;
+    if (await windowManager.isMinimized()) return;
     final r = await windowManager.getBounds();
+    if (await windowManager.isMinimized()) return;
+    if (minimizedPlaceholder(r) ||
+        busy ||
+        maximized ||
+        noteVisible ||
+        epoch != _geometryEpoch ||
+        wasCollapsed != collapsed ||
+        r.width <= 0 ||
+        r.height <= 0) {
+      return;
+    }
     if (collapsed) {
       ball = r;
     } else if (docked == null) {
       expanded = r;
+      _normalBeforeCollapse = r;
     }
     await persist();
     if (calendar && !locked && docked == null) {
@@ -753,43 +823,80 @@ class DesktopController extends ChangeNotifier with WindowListener {
     }
   }
 
+  Future<void> Function(Rect? bounds)? onHoverNote;
+  bool get externalNote => onHoverNote != null;
   bool noteVisible = false;
   Offset noteBallOffset = Offset.zero;
+  Rect notePanelRect = const Rect.fromLTWH(8, 8, 288, 304);
   Rect? _noteAnchor;
+  Rect? _noteWindowBounds;
+  Future<bool?> pointerOverBallNote() async {
+    final bounds = noteVisible ? _noteWindowBounds : ball;
+    if (bounds == null) return null;
+    try {
+      return bounds
+          .inflate(6)
+          .contains(await screenRetriever.getCursorScreenPoint());
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   Future<void> _noteWork = Future.value();
+  Future<Rect> hoverWorkArea(Rect anchor) async {
+    final displays = await screenRetriever.getAllDisplays();
+    final display =
+        displays
+            .where(
+              (d) => Rect.fromLTWH(
+                d.visiblePosition?.dx ?? 0,
+                d.visiblePosition?.dy ?? 0,
+                d.visibleSize?.width ?? d.size.width,
+                d.visibleSize?.height ?? d.size.height,
+              ).contains(anchor.center),
+            )
+            .firstOrNull ??
+        await screenRetriever.getPrimaryDisplay();
+    return (display.visiblePosition ?? Offset.zero) &
+        (display.visibleSize ?? display.size);
+  }
+
   Future<void> showBallNote(bool visible) {
     final work = _noteWork.then((_) async {
       if (!collapsed || busy || visible == noteVisible) return;
       busy = true;
+      _geometryEpoch++;
+      _saveTimer?.cancel();
       try {
         if (visible) {
           _noteAnchor = await windowManager.getBounds();
-          final displays = await screenRetriever.getAllDisplays();
-          final display =
-              displays
-                  .where(
-                    (d) => Rect.fromLTWH(
-                      d.visiblePosition?.dx ?? 0,
-                      d.visiblePosition?.dy ?? 0,
-                      d.visibleSize?.width ?? d.size.width,
-                      d.visibleSize?.height ?? d.size.height,
-                    ).contains(_noteAnchor!.center),
-                  )
-                  .firstOrNull ??
-              await screenRetriever.getPrimaryDisplay();
-          final origin = display.visiblePosition ?? Offset.zero;
-          final size = display.visibleSize ?? display.size;
-          final target = floatingNoteBounds(_noteAnchor!, origin & size);
-          noteBallOffset = _noteAnchor!.topLeft - target.topLeft;
+          final layout = floatingNoteLayout(
+            _noteAnchor!,
+            await hoverWorkArea(_noteAnchor!),
+          );
+          final target = layout.bounds;
+          notePanelRect = layout.note;
+          ball = _noteAnchor;
           noteVisible = true;
+          _noteWindowBounds = target;
+          noteBallOffset = externalNote ? Offset.zero : layout.ballOffset;
+          if (externalNote) {
+            await onHoverNote!(layout.note.shift(target.topLeft).inflate(8));
+          } else {
+            await windowManager.setBounds(target);
+          }
           notifyListeners();
-          await windowManager.setBounds(target);
         } else {
           final anchor = _noteAnchor;
           noteVisible = false;
           noteBallOffset = Offset.zero;
-          if (anchor != null) await windowManager.setBounds(anchor);
+          if (externalNote) {
+            await onHoverNote!(null);
+          } else if (anchor != null) {
+            await windowManager.setBounds(anchor);
+          }
           _noteAnchor = null;
+          _noteWindowBounds = null;
           notifyListeners();
         }
       } finally {
@@ -800,25 +907,35 @@ class DesktopController extends ChangeNotifier with WindowListener {
     return work;
   }
 
-  Future<void> collapse() async {
+  Future<void> collapse({bool captureBounds = true}) async {
     if (busy || collapsed || _editing) return;
     if (maximized) {
       await toggleMaximize();
     }
     busy = true;
+    _geometryEpoch++;
+    _saveTimer?.cancel();
     try {
-      expanded = await windowManager.getBounds();
+      if (captureBounds && !await windowManager.isMinimized()) {
+        expanded = await windowManager.getBounds();
+      }
+      _normalBeforeCollapse =
+          expanded ??
+          _normalBeforeCollapse ??
+          const Rect.fromLTWH(60, 60, 430, 700);
+      expanded = _normalBeforeCollapse;
+      if (await windowManager.isMinimized()) await windowManager.restore();
       await persist();
       await native.invokeMethod('embed', false);
       collapsed = true;
       await windowManager.setMinimumSize(const Size(68, 68));
       await windowManager.setResizable(false);
-      await windowManager.setBounds(
-        await clamp(
-          ball ??
-              Rect.fromLTWH(expanded?.left ?? 60, expanded?.top ?? 60, 68, 68),
-        ),
+      final anchor = await clamp(
+        ball ?? Rect.fromLTWH(expanded!.left, expanded!.top, 68, 68),
       );
+      await windowManager.setBounds(anchor);
+      ball = anchor;
+      await persist();
       await windowManager.setAlwaysOnTop(true);
       notifyListeners();
     } finally {
@@ -830,6 +947,10 @@ class DesktopController extends ChangeNotifier with WindowListener {
     await showBallNote(false);
     if (busy) return;
     busy = true;
+    _geometryEpoch++;
+    _saveTimer?.cancel();
+    final restoreTarget =
+        (collapsed ? _normalBeforeCollapse : null) ?? expanded;
     _edgeTimer?.cancel();
     try {
       if (_hideFirstFrame) {
@@ -838,6 +959,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
         await windowManager.setSkipTaskbar(false);
       }
       if (embedded) await native.invokeMethod('embed', false);
+      if (await windowManager.isMinimized()) await windowManager.restore();
       if (await windowManager.isFullScreen()) {
         await windowManager.setFullScreen(false);
       }
@@ -845,12 +967,12 @@ class DesktopController extends ChangeNotifier with WindowListener {
         await windowManager.unmaximize();
       }
       maximized = false;
-      if (collapsed) ball = await windowManager.getBounds();
+      // The OS may already have moved a minimized balloon; retain the last stable anchor.
       collapsed = false;
       docked = null;
       await windowManager.setMinimumSize(const Size(340, 440));
       await windowManager.setBounds(
-        await clamp(expanded ?? const Rect.fromLTWH(60, 60, 430, 700)),
+        await clamp(restoreTarget ?? const Rect.fromLTWH(60, 60, 430, 700)),
       );
       await windowManager.setResizable(!locked);
       await windowManager.setAlwaysOnTop(false);
@@ -1043,7 +1165,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
 
   Future<void> _handleNativeCall(MethodCall call) async {
     if (call.method == 'primaryActivated') {
-      if (collapsed && !busy) guard(expand);
+      guard(wakeFromFocus);
       return;
     }
     if (call.method == 'desktopEmbedFailed') {

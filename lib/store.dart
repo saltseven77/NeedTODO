@@ -4,7 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart' show Color;
+import 'package:flutter/painting.dart' show Color, Rect;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -302,6 +302,30 @@ class AppStore extends ChangeNotifier {
   Timer? _timer;
   HttpServer? _ipc;
   Process? _calendar;
+  Process? _hoverPopup;
+  Rect? _hoverBounds;
+  int _hoverRevision = 0;
+  Future<void> showHoverNote(Rect? bounds) async {
+    _hoverBounds = bounds;
+    _hoverRevision++;
+    if (bounds == null) return;
+    _ipc ??= await HttpServer.bind(InternetAddress.loopbackIPv4, 0)
+      ..listen(_handlePeer);
+    if (_hoverPopup != null) return;
+    final child = await Process.start(Platform.resolvedExecutable, [
+      '--calendar',
+      '${_ipc!.port}',
+      _ipcToken,
+      '--hover-note',
+    ]);
+    _hoverPopup = child;
+    child.stdout.drain<void>();
+    child.stderr.drain<void>();
+    child.exitCode.then((_) {
+      if (identical(_hoverPopup, child)) _hoverPopup = null;
+    });
+  }
+
   Stopwatch? _calendarStartup;
   bool _openingCalendar = false;
   final String _ipcToken = base64UrlEncode(
@@ -925,7 +949,9 @@ class AppStore extends ChangeNotifier {
         } on MissingPluginException {
           /* Compatible with older runners. */
         }
-        if (alive || (_calendarStartup?.elapsed ?? const Duration(seconds: 10)) < const Duration(seconds: 10)) {
+        if (alive ||
+            (_calendarStartup?.elapsed ?? const Duration(seconds: 10)) <
+                const Duration(seconds: 10)) {
           calendarOpenSignal++;
           return;
         }
@@ -968,6 +994,32 @@ class AppStore extends ChangeNotifier {
     try {
       if (req.headers.value('authorization') != _ipcToken) {
         req.response.statusCode = 403;
+        return;
+      }
+      if (req.method == 'GET' && req.uri.path == '/hover-note') {
+        final bounds = _hoverBounds;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write(
+          jsonEncode({
+            'visible': bounds != null,
+            'revision': _hoverRevision,
+            'generation': generation,
+            'day': dayKey(DateTime.now()),
+            if (bounds != null)
+              'bounds': {
+                'x': bounds.left,
+                'y': bounds.top,
+                'w': bounds.width,
+                'h': bounds.height,
+              },
+            if (bounds != null)
+              'tasks': schedule(
+                'day',
+                DateTime.now(),
+              ).map((t) => t.toJson()).toList(),
+            'accent': document.list.palette.accent.toARGB32(),
+          }),
+        );
         return;
       }
       if (req.method == 'POST' && req.uri.path == '/action') {
@@ -1027,6 +1079,7 @@ class AppStore extends ChangeNotifier {
   Future<void> shutdown() async {
     await flushDrafts();
     _timer?.cancel();
+    _hoverPopup?.kill();
     _calendar?.kill();
     await _writes;
     await storage.flush();

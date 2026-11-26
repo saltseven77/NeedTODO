@@ -55,7 +55,7 @@ void main() {
     'taskbar focus and minimized floating ball expand the main interface',
     () async {
       final controller = WakeDesktop()..collapsed = true;
-      controller.onWindowFocus();
+      await controller.wakeFromFocus();
       await Future<void>.delayed(Duration.zero);
       expect(controller.expansions, 1);
       expect(controller.collapsed, false);

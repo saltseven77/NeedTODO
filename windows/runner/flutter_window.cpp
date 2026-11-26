@@ -9,6 +9,8 @@
 
 namespace {
 constexpr UINT kTrayMessage = WM_APP + 41;
+
+
 }
 
 #include "flutter/generated_plugin_registrant.h"
@@ -75,7 +77,8 @@ bool FlutterWindow::OnCreate() {
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     first_frame_presented_ = true;
-    this->Show();
+    if(GetPropW(GetHandle(),L"NeedTODO.HoverNote"))ShowWindow(GetHandle(),SW_SHOWNOACTIVATE);
+    else this->Show();
     PostMessage(GetHandle(), kEmbedAfterFrame, 0, 0);
   });
 
@@ -215,6 +218,7 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if(message==WM_MOUSEACTIVATE && GetPropW(hwnd,L"NeedTODO.HoverNote"))return MA_NOACTIVATE;
   if (message == kEmbedAfterFrame) {
     if (pending_embed_) {
       pending_embed_ = false;
@@ -228,7 +232,8 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == WM_SIZE && wparam != SIZE_MINIMIZED) RefreshContent();
   if (message == WM_ACTIVATE && LOWORD(wparam) != WA_INACTIVE &&
       GetPropW(hwnd, L"NeedTODO.Primary") && platform_channel_) {
-    platform_channel_->InvokeMethod("primaryActivated", nullptr);
+    const bool from_hover = lparam && GetPropW(reinterpret_cast<HWND>(lparam),L"NeedTODO.HoverNote");
+    if (!from_hover) platform_channel_->InvokeMethod("primaryActivated", nullptr);
   }
   if (message == kRestoreMessage && platform_channel_) {
     platform_channel_->InvokeMethod("trayAction", std::make_unique<flutter::EncodableValue>(1));

@@ -25,6 +25,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // The calendar is a child process; repeated launches of the primary app must
   // not create competing writers for the same local document.
   const bool calendar = !command_line_arguments.empty() && command_line_arguments[0] == "--calendar";
+  const bool hover_note = calendar && command_line_arguments.size() == 4 && command_line_arguments[3] == "--hover-note";
   HANDLE singleton = nullptr;
   if (!calendar) {
     singleton = CreateMutexW(nullptr, FALSE, L"Local\\NeedTODO.Flutter.Main");
@@ -66,6 +67,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   if (!calendar) SetPropW(window.GetHandle(), L"NeedTODO.Primary", reinterpret_cast<HANDLE>(1));
+  if (hover_note) {
+    SetPropW(window.GetHandle(),L"NeedTODO.HoverNote",reinterpret_cast<HANDLE>(1));
+    const auto style=GetWindowLongPtr(window.GetHandle(),GWL_EXSTYLE);
+    SetWindowLongPtr(window.GetHandle(),GWL_EXSTYLE,(style|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW)&~WS_EX_APPWINDOW);
+  }
   window.SetQuitOnClose(true);
 
   ::MSG msg;
