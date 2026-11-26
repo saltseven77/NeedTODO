@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show min, max;
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -1018,18 +1017,17 @@ class DesktopController extends ChangeNotifier with WindowListener {
   Future<void> setEmbedded(bool value) async {
     if (busy) return;
     busy = true;
+    notifyListeners();
     _saveTimer?.cancel();
     final previous = embedded, previousLock = locked;
     try {
-      // Reconfigure only while top-level. Reparenting an open editor steals IME focus.
+      // Change the desktop parent only for a real lock/unlock request.
       if (!value && embedded) await native.invokeMethod('embed', false);
       await windowManager.setResizable(!value);
-      await windowManager.setAlwaysOnTop(false);
-      if (!_editing && value) await native.invokeMethod('embed', true);
+      if (value) await native.invokeMethod('embed', true);
       embedded = value;
       locked = value;
       await persist();
-      notifyListeners();
     } catch (_) {
       // Failed attachment must leave a usable ordinary window, not retry the same bad host.
       if (value) {
@@ -1040,7 +1038,6 @@ class DesktopController extends ChangeNotifier with WindowListener {
         await windowManager.show();
         await refreshLayout();
         await persist();
-        notifyListeners();
       } else {
         embedded = previous;
         locked = previousLock;
@@ -1049,6 +1046,7 @@ class DesktopController extends ChangeNotifier with WindowListener {
       rethrow;
     } finally {
       busy = false;
+      notifyListeners();
     }
   }
 
@@ -1061,27 +1059,13 @@ class DesktopController extends ChangeNotifier with WindowListener {
     // Top-level dialogs already have focus. Showing/focusing the native window
     // for every dialog creates unnecessary activation and redraw transitions.
     if (!embedded) return;
-    busy = true;
-    _saveTimer?.cancel();
+    // Flutter panels share this view: keep its desktop parent and geometry intact.
+    // Focus the existing render view for keyboard/IME input instead of promoting it.
     try {
-      if (value) {
-        if (embedded) await native.invokeMethod('embed', false);
-        await windowManager.show();
-        await windowManager.focus();
-      } else if (embedded) {
-        try {
-          await native.invokeMethod('embed', true);
-        } catch (_) {
-          embedded = false;
-          locked = false;
-          await windowManager.setResizable(true);
-          await persist();
-          notifyListeners();
-          rethrow;
-        }
-      }
-    } finally {
-      busy = false;
+      await native.invokeMethod('desktopEditing', value);
+    } catch (_) {
+      _editing = !value;
+      rethrow;
     }
   }
 

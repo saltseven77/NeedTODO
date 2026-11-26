@@ -47,6 +47,12 @@ bool FlutterWindow::OnCreate() {
       if (!enabled) { result->Error("argument", "Invalid desktop state"); return; }
       if (!SetDesktopEmbedded(*enabled)) { result->Error("desktop", "Windows 桌面暂不可用"); return; }
       result->Success();
+    } else if (call.method_name() == "desktopEditing") {
+      const auto* editing = call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
+      if (!editing) { result->Error("argument", "Invalid editor state"); return; }
+      // This is already an interactive Explorer child. Do not detach or raise it.
+      if (*editing && flutter_controller_) SetFocus(flutter_controller_->view()->GetNativeWindow());
+      result->Success();
     } else if (call.method_name() == "refreshLayout") {
       RefreshContent(); result->Success();
     } else if (call.method_name() == "calendarAlive") {
@@ -147,7 +153,10 @@ void FlutterWindow::RefreshContent() {
   const int width = rect.right - rect.left, height = rect.bottom - rect.top;
   if (width <= 0 || height <= 0) return;
   const HWND view = flutter_controller_->view()->GetNativeWindow();
-  SetWindowPos(view, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+  RECT current{}; GetClientRect(view, &current);
+  if (current.right != width || current.bottom != height) {
+    SetWindowPos(view, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+  }
   RedrawWindow(view, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
   flutter_controller_->ForceRedraw();
 }
@@ -258,6 +267,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     auto* position = reinterpret_cast<WINDOWPOS*>(lparam);
     position->flags |= SWP_NOMOVE | SWP_NOSIZE;
   }
+  // window_manager returns HTNOWHERE for non-resizable windows. A locked calendar
+  // must still accept its first click on controls and text fields.
+  if (message == WM_NCHITTEST && desktop_parent_) return HTCLIENT;
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

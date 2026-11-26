@@ -85,13 +85,13 @@ void main() {
     },
   );
   test(
-    'embedding is deferred until settings closes and detached before editing',
+    'locking takes effect in settings and editing preserves the desktop parent',
     () async {
       final calls = <String>[];
       final messenger =
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(native, (call) async {
-        calls.add('embed:${call.arguments}');
+        calls.add('${call.method}:${call.arguments}');
         return null;
       });
       messenger.setMockMethodCallHandler(
@@ -114,13 +114,12 @@ void main() {
       await controller.setLocked(true);
       expect(controller.embedded, true);
       expect(calls, contains('setResizable'));
-      expect(calls, isNot(contains('embed:true')));
+      expect(calls, contains('embed:true'));
       await controller.editing(false);
-      expect(calls.last, 'embed:true');
+      expect(calls.last, 'desktopEditing:false');
       calls.clear();
       await controller.editing(true);
-      expect(calls.first, 'embed:false');
-      expect(calls, contains('focus'));
+      expect(calls, ['desktopEditing:true']);
       await controller.setLocked(false);
       await controller.editing(false);
       expect(controller.embedded, false);
@@ -149,8 +148,7 @@ void main() {
       });
       final c = DesktopController(MemoryStorage(), calendar: true);
       await c.editing(true);
-      await c.setEmbedded(true);
-      await expectLater(c.editing(false), throwsA(isA<PlatformException>()));
+      await expectLater(c.setEmbedded(true), throwsA(isA<PlatformException>()));
       expect(c.embedded, false);
       expect(c.locked, false);
       expect(c.busy, false);
