@@ -26,8 +26,11 @@ void main() {
     const area = Rect.fromLTWH(-1920, 0, 1920, 1040);
     const anchor = Rect.fromLTWH(-68, 972, 68, 68);
     final note = floatingNoteBounds(anchor, area);
-    expect(note, const Rect.fromLTWH(-380, 710, 380, 330));
-    expect(anchor.topLeft - note.topLeft, const Offset(312, 262));
+    final layout = floatingNoteLayout(anchor, area);
+    final panel = layout.note.shift(layout.bounds.topLeft);
+    expect(panel.bottom, lessThan(anchor.top));
+    expect(panel.overlaps(anchor), false);
+    expect(layout.ballOffset + layout.bounds.topLeft, anchor.topLeft);
     expect(area.contains(note.topLeft), true);
   });
   testWidgets('reminder wheels respond to mouse dragging and scrolling', (

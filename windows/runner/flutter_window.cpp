@@ -9,6 +9,8 @@
 
 namespace {
 constexpr UINT kTrayMessage = WM_APP + 41;
+
+
 }
 
 #include "flutter/generated_plugin_registrant.h"
@@ -45,6 +47,24 @@ bool FlutterWindow::OnCreate() {
       if (!enabled) { result->Error("argument", "Invalid desktop state"); return; }
       if (!SetDesktopEmbedded(*enabled)) { result->Error("desktop", "Windows 桌面暂不可用"); return; }
       result->Success();
+    } else if (call.method_name() == "refreshLayout") {
+      RefreshContent(); result->Success();
+    } else if (call.method_name() == "calendarAlive") {
+      const auto* pid = call.arguments() ? std::get_if<int>(call.arguments()) : nullptr;
+      if (!pid) { result->Error("argument", "Invalid calendar process"); return; }
+      struct Search { DWORD pid; bool found; } search{static_cast<DWORD>(*pid), false};
+      const auto inspect = [](HWND hwnd, LPARAM value) -> BOOL {
+        auto* search = reinterpret_cast<Search*>(value); DWORD pid = 0; GetWindowThreadProcessId(hwnd, &pid);
+        wchar_t name[128]{}; GetClassName(hwnd, name, 128);
+        if (pid == search->pid && wcscmp(name, L"FLUTTER_RUNNER_WIN32_WINDOW") == 0) search->found = true;
+        return TRUE;
+      };
+      struct Walk { Search* search; WNDENUMPROC inspect; } walk{&search, inspect};
+      EnumWindows([](HWND hwnd, LPARAM value) -> BOOL {
+        auto* walk = reinterpret_cast<Walk*>(value); walk->inspect(hwnd, reinterpret_cast<LPARAM>(walk->search));
+        EnumChildWindows(hwnd, walk->inspect, reinterpret_cast<LPARAM>(walk->search)); return TRUE;
+      }, reinterpret_cast<LPARAM>(&walk));
+      result->Success(flutter::EncodableValue(search.found));
     } else if (call.method_name() == "trayEnable") {
       const auto* enabled = call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
       if (!enabled || !SetTrayEnabled(*enabled)) { result->Error("tray", "系统托盘暂不可用"); return; }
@@ -56,7 +76,10 @@ bool FlutterWindow::OnCreate() {
   taskbar_created_ = RegisterWindowMessage(L"TaskbarCreated");
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
-    this->Show();
+    first_frame_presented_ = true;
+    if(GetPropW(GetHandle(),L"NeedTODO.HoverNote"))ShowWindow(GetHandle(),SW_SHOWNOACTIVATE);
+    else this->Show();
+    PostMessage(GetHandle(), kEmbedAfterFrame, 0, 0);
   });
 
   // Flutter can complete the first frame before the "show window" callback is
@@ -118,9 +141,22 @@ void FlutterWindow::ShowTrayMenu() {
       std::make_unique<flutter::EncodableValue>(static_cast<int>(selected)));
 }
 
+void FlutterWindow::RefreshContent() {
+  if (!flutter_controller_ || !GetHandle() || IsIconic(GetHandle())) return;
+  RECT rect{}; GetClientRect(GetHandle(), &rect);
+  const int width = rect.right - rect.left, height = rect.bottom - rect.top;
+  if (width <= 0 || height <= 0) return;
+  const HWND view = flutter_controller_->view()->GetNativeWindow();
+  SetWindowPos(view, nullptr, 0, 0, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+  RedrawWindow(view, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+  flutter_controller_->ForceRedraw();
+}
+
 bool FlutterWindow::SetDesktopEmbedded(bool enabled) {
   HWND hwnd = GetHandle();
   if (!hwnd || !IsWindow(hwnd)) return !enabled;
+  if (!enabled) pending_embed_ = false;
+  if (enabled && !first_frame_presented_) { pending_embed_ = true; return true; }
   if (embedding_transition_) return false;
   if (enabled && desktop_parent_ && IsWindow(desktop_parent_) && GetParent(hwnd) == desktop_parent_) return true;
   embedding_transition_ = true;
@@ -132,19 +168,25 @@ bool FlutterWindow::SetDesktopEmbedded(bool enabled) {
     SetWindowPos(hwnd, HWND_NOTOPMOST, desktop_bounds_.left, desktop_bounds_.top,
         desktop_bounds_.right-desktop_bounds_.left, desktop_bounds_.bottom-desktop_bounds_.top,
         SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    if (flutter_controller_) flutter_controller_->ForceRedraw();
+    RefreshContent();
   };
   if (!enabled) {
     if (desktop_parent_) restore();
     embedding_transition_ = false;
     return true;
   }
-  HWND host = FindWindow(L"Progman", nullptr);
-  if (!host) { embedding_transition_ = false; return false; }
-  if (!FindWindowEx(host, nullptr, L"SHELLDLL_DefView", nullptr)) {
-    HWND worker = nullptr; host = nullptr;
+  HWND shell = FindWindow(L"Progman", nullptr);
+  DWORD shell_pid = 0; if (shell) GetWindowThreadProcessId(shell, &shell_pid);
+  const auto valid_host = [shell_pid](HWND host) {
+    DWORD pid = 0; RECT area{}; GetWindowThreadProcessId(host, &pid);
+    return shell_pid && pid == shell_pid && IsWindowVisible(host) && GetClientRect(host, &area) &&
+        area.right > area.left && area.bottom > area.top &&
+        FindWindowEx(host, nullptr, L"SHELLDLL_DefView", nullptr);
+  };
+  HWND host = valid_host(shell) ? shell : nullptr;
+  if (!host) { HWND worker = nullptr;
     while ((worker = FindWindowEx(nullptr, worker, L"WorkerW", nullptr))) {
-      if (FindWindowEx(worker, nullptr, L"SHELLDLL_DefView", nullptr)) { host = worker; break; }
+      if (valid_host(worker)) { host = worker; break; }
     }
   }
   if (!host) { embedding_transition_ = false; return false; }
@@ -167,7 +209,7 @@ bool FlutterWindow::SetDesktopEmbedded(bool enabled) {
   SetWindowPos(hwnd, HWND_TOP, point.x, point.y,
       desktop_bounds_.right-desktop_bounds_.left, desktop_bounds_.bottom-desktop_bounds_.top,
       SWP_FRAMECHANGED|SWP_NOACTIVATE|SWP_SHOWWINDOW);
-  if (flutter_controller_) flutter_controller_->ForceRedraw();
+  RefreshContent();
   embedding_transition_ = false;
   return true;
 }
@@ -176,6 +218,23 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if(message==WM_MOUSEACTIVATE && GetPropW(hwnd,L"NeedTODO.HoverNote"))return MA_NOACTIVATE;
+  if (message == kEmbedAfterFrame) {
+    if (pending_embed_) {
+      pending_embed_ = false;
+      if (!SetDesktopEmbedded(true) && platform_channel_) {
+        platform_channel_->InvokeMethod("desktopEmbedFailed", nullptr);
+      }
+    }
+    RefreshContent(); return 0;
+  }
+  // Keep Flutter's child viewport in sync even if a plugin consumes WM_SIZE.
+  if (message == WM_SIZE && wparam != SIZE_MINIMIZED) RefreshContent();
+  if (message == WM_ACTIVATE && LOWORD(wparam) != WA_INACTIVE &&
+      GetPropW(hwnd, L"NeedTODO.Primary") && platform_channel_) {
+    const bool from_hover = lparam && GetPropW(reinterpret_cast<HWND>(lparam),L"NeedTODO.HoverNote");
+    if (!from_hover) platform_channel_->InvokeMethod("primaryActivated", nullptr);
+  }
   if (message == kRestoreMessage && platform_channel_) {
     platform_channel_->InvokeMethod("trayAction", std::make_unique<flutter::EncodableValue>(1));
     return 0;
@@ -204,7 +263,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     std::optional<LRESULT> result =
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
                                                       lparam);
-    if (result) {
+    if (result && message != WM_DESTROY) {
       return *result;
     }
   }
